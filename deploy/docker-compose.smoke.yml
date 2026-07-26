@@ -1,0 +1,48 @@
+# sandbox_service 冒烟编排：通用沙箱服务 + echo-agent（零业务）端到端验证。
+#
+# 仓库根执行：
+#   docker compose -f deploy/sandbox_service/docker-compose.smoke.yml up -d --build
+#   bash deploy/sandbox_service/smoke.sh
+#   docker compose -f deploy/sandbox_service/docker-compose.smoke.yml down
+#
+# 与生产 compose 的差异：
+#   - agent 镜像换成 echo-agent（不依赖 LLM/MinIO/DB），只验通用路径；
+#   - SERVICE_TOKEN 置空（免鉴权），ENABLE_LEGACY_SHIM=0（纯通用形态）；
+#   - 无 MinIO（echo 不触发快照恢复，ObjectStore 惰性不连接）。
+#
+# 关键约束（同生产）：sandbox_service 经 docker.sock 起 sibling echo 容器，
+# 与其同处默认 bridge（network_mode: bridge），否则代理连不到 agent IP；
+# workspace 根用「宿主机同路径 bind」，agent 容器才挂得到同一目录。
+
+services:
+  echo-agent-image:
+    build:
+      context: ../..
+      dockerfile: echo_agent/Dockerfile
+    image: echo-agent:latest
+    entrypoint: ["/bin/true"]
+    restart: "no"
+
+  sandbox_service:
+    build:
+      context: ../..
+      dockerfile: sandbox_service/Dockerfile
+    image: sandbox-service:latest
+    network_mode: bridge
+    ports:
+      - "${SANDBOX_SERVICE_PORT:-8001}:8001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SMOKE_WORKSPACE_ROOT:-/tmp/sandbox-smoke-ws}:${SMOKE_WORKSPACE_ROOT:-/tmp/sandbox-smoke-ws}
+    environment:
+      SERVICE_TOKEN: ""
+      SANDBOX_WORKSPACE_ROOT: ${SMOKE_WORKSPACE_ROOT:-/tmp/sandbox-smoke-ws}
+      AGENT_IMAGE: echo-agent:latest
+      AGENT_PORT: "8080"
+      ENABLE_LEGACY_SHIM: "0"
+      WORKSPACE_SKELETON_DIRS: ""
+      POOL_CAPACITY: "4"
+      IDLE_TTL_SECONDS: "600"
+    depends_on:
+      - echo-agent-image
+    restart: "no"

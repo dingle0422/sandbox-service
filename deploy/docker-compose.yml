@@ -1,0 +1,61 @@
+# sandbox_service：通用沙箱服务（旧 vm2 sandbox_manager 的继任者）
+#
+# 仓库根执行：
+#   docker compose -f deploy/sandbox_service/docker-compose.yml --env-file deploy/sandbox_service/.env up -d --build
+#
+# 需本机 Docker；挂载 docker.sock。agent 容器由本服务动态 create/start。
+# 与旧 sandbox_manager 并行灰度：换端口起本服务，vm1 把 VM2_URL 指过来即可（shim 兼容旧路由）。
+
+services:
+  agent-image:
+    build:
+      # Dockerfile.agent 需把 backend/ 外的 std_agent_sdk 一并纳入镜像，故上下文＝仓库根
+      context: ../..
+      dockerfile: backend/sandbox_manager/Dockerfile.agent
+    image: ${AGENT_IMAGE:-tax-agent:agent-latest}
+    entrypoint: ["/bin/true"]
+    restart: "no"
+
+  sandbox_service:
+    build:
+      context: ../..
+      dockerfile: sandbox_service/Dockerfile
+    image: ${SANDBOX_SERVICE_IMAGE:-sandbox-service:latest}
+    # 与动态起的 agent 容器同处默认 bridge，否则健康检查/代理连不到 agent IP
+    network_mode: bridge
+    ports:
+      - "${SANDBOX_SERVICE_PORT:-8001}:8001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 必须用「宿主机同路径 bind」（经 docker.sock 给 agent 挂 workspace 时按宿主机路径解析）
+      - ${SANDBOX_HOST_WORKSPACE_ROOT:-/var/sandbox/workspaces}:${SANDBOX_HOST_WORKSPACE_ROOT:-/var/sandbox/workspaces}
+    environment:
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?set SERVICE_TOKEN}
+      SANDBOX_WORKSPACE_ROOT: ${SANDBOX_HOST_WORKSPACE_ROOT:-/var/sandbox/workspaces}
+      AGENT_IMAGE: ${AGENT_IMAGE:-tax-agent:agent-latest}
+      AGENT_COMMAND: ${AGENT_COMMAND:-}
+      AGENT_PORT: ${AGENT_PORT:-8080}
+      AGENT_CPU: ${AGENT_CPU:-}
+      AGENT_MEM_MB: ${AGENT_MEM_MB:-}
+      AGENT_NETWORK: ${AGENT_NETWORK:-}
+      AGENT_EGRESS_ALLOW: ${AGENT_EGRESS_ALLOW:-}
+      AGENT_CODE_MOUNTS: ${AGENT_CODE_MOUNTS:-}
+      AGENT_CODE_DIR: ${AGENT_CODE_DIR:-}
+      POOL_CAPACITY: ${POOL_CAPACITY:-8}
+      IDLE_TTL_SECONDS: ${IDLE_TTL_SECONDS:-600}
+      # 工作区骨架（本仓税务业务需要 inputs/knowledge/uploads；其它业务按需配置）
+      WORKSPACE_SKELETON_DIRS: ${WORKSPACE_SKELETON_DIRS:-inputs,knowledge,uploads}
+      # 通用事件通知 sink（可选，部署级默认）：exit/dead/evict。调用方也可在 POST /sandboxes
+      # 时按沙箱自带 callback_url 覆盖——服务不持有任何应用业务地址。
+      CALLBACK_URL: ${CALLBACK_URL:-}
+      # 本仓税务兼容层（被动路由翻译）：置 0 关闭，成为纯通用沙箱服务
+      ENABLE_LEGACY_SHIM: ${ENABLE_LEGACY_SHIM:-1}
+      # ObjectStore（默认 minio）
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:?set MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY}
+      MINIO_SECURE: ${MINIO_SECURE:-false}
+      MINIO_DEFAULT_BUCKET: ${MINIO_DEFAULT_BUCKET:-analysis-platform}
+    depends_on:
+      - agent-image
+    restart: unless-stopped
