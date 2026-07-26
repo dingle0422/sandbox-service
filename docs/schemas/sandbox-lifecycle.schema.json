@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://single-enterprise-tax-agent/protocol/sandbox-lifecycle.schema.json",
+  "title": "Sandbox Lifecycle API v1.0",
+  "description": "综合沙箱服务北向契约（docs/protocol/sandbox-lifecycle.md，目标形态）。fixture 可为任一 $defs 实例（宽松请求体可命中多个 def，故用 anyOf）。",
+  "anyOf": [
+    { "$ref": "#/$defs/ServiceHealth" },
+    { "$ref": "#/$defs/CreateSandboxRequest" },
+    { "$ref": "#/$defs/CreateSandboxResponse" },
+    { "$ref": "#/$defs/SandboxStatus" },
+    { "$ref": "#/$defs/CapacityStats" },
+    { "$ref": "#/$defs/SnapshotRestoreRequest" },
+    { "$ref": "#/$defs/WebhookNotification" }
+  ],
+  "$defs": {
+    "ServiceHealth": {
+      "type": "object",
+      "description": "GET /health 响应（公开）",
+      "required": ["ok", "apiVersion"],
+      "properties": {
+        "ok": { "const": true },
+        "apiVersion": { "type": "string", "pattern": "^\\d+\\.\\d+$" },
+        "image": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "CreateSandboxRequest": {
+      "type": "object",
+      "description": "POST /sandboxes 请求体（业务中立：不含任何领域字段）",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "调用方稳定标识；同 id 幂等复用" },
+        "image": { "type": "string", "description": "缺省用服务配置 AGENT_IMAGE" },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "不透明透传进容器，服务不解析"
+        },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 8080 },
+        "resource_limits": {
+          "type": "object",
+          "properties": {
+            "cpu": { "type": "number", "exclusiveMinimum": 0 },
+            "mem_mb": { "type": "integer", "exclusiveMinimum": 0 }
+          },
+          "additionalProperties": true
+        },
+        "egress_allow": { "type": "array", "items": { "type": "string" } },
+        "wait_ready": {
+          "type": "object",
+          "description": "就绪探测：HTTP GET path 返回 200 即绪",
+          "properties": {
+            "path": { "type": "string", "default": "/agent/health" },
+            "timeout_s": { "type": "number", "exclusiveMinimum": 0, "default": 90 }
+          },
+          "additionalProperties": false
+        },
+        "callback_url": {
+          "type": ["string", "null"],
+          "description": "本沙箱事件通知 sink（evict/dead/exited）；缺省回落部署级 CALLBACK_URL。服务视作不透明 URL"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CreateSandboxResponse": {
+      "type": "object",
+      "description": "POST /sandboxes 200 响应",
+      "required": ["id", "container_id", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "container_id": { "type": "string" },
+        "status": { "enum": ["ready", "reused"] },
+        "workspace": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "SandboxStatus": {
+      "type": "object",
+      "description": "GET /sandboxes/{id} 响应",
+      "required": ["state", "running"],
+      "properties": {
+        "state": { "enum": ["creating", "running", "idle", "evict_candidate", "dead", "terminated", "created", "exited"] },
+        "running": { "type": "boolean" },
+        "exit_code": { "type": ["integer", "null"] },
+        "started_at": { "type": ["string", "null"] },
+        "probe": {
+          "type": ["object", "null"],
+          "description": "就绪探测端点的原样响应（如 agent health，含 contractVersion）"
+        }
+      },
+      "additionalProperties": true
+    },
+    "CapacityStats": {
+      "type": "object",
+      "description": "GET /capacity 响应",
+      "required": ["live", "capacity"],
+      "properties": {
+        "live": { "type": "integer", "minimum": 0 },
+        "leased": { "type": "integer", "minimum": 0 },
+        "idle": { "type": "integer", "minimum": 0 },
+        "capacity": { "type": "integer", "minimum": 1 },
+        "idleTtl": { "type": "number", "minimum": 0 },
+        "evict_candidates": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "SnapshotRestoreRequest": {
+      "type": "object",
+      "description": "POST /sandboxes/{id}/workspace/snapshot/restore 请求体",
+      "required": ["payload_key"],
+      "properties": {
+        "payload_key": { "type": "string", "minLength": 1, "description": "不透明快照 key（服务只做存取，不解语义）" },
+        "scope": {
+          "type": "object",
+          "properties": {
+            "preserve": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": ["knowledge", ".agent"],
+              "description": "恢复时保留的工作区顶层项"
+            }
+          },
+          "additionalProperties": false
+        },
+        "blob_key_template": {
+          "type": ["string", "null"],
+          "description": "可选：快照内 uploads-meta/upload-log.json 的 blob key 模板（占位符 {sha}/{sha2}），由调用方提供，服务不解读归属语义"
+        }
+      },
+      "additionalProperties": false
+    },
+    "WebhookNotification": {
+      "type": "object",
+      "description": "POST {CALLBACK_URL} 通知体",
+      "required": ["kind", "sandbox_id", "ts"],
+      "properties": {
+        "kind": { "enum": ["evict_candidate", "dead", "exited"] },
+        "sandbox_id": { "type": "string" },
+        "container_id": { "type": "string" },
+        "reason": { "enum": ["idle_ttl", "health_probe_failed", "oom", "exit"] },
+        "ts": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

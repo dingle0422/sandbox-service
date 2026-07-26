@@ -1,0 +1,19 @@
+{
+  "run_id": "r-20260724-001",
+  "session_id": "s-demo-1",
+  "conversation_id": "c-1",
+  "thread_id": "t-1",
+  "user_text": "分析本期研发费用加计扣除空间",
+  "history": [],
+  "model": "qwen-max",
+  "enterprise_id": "ent-001",
+  "period": "2026Q2",
+  "owner_id": "u-1",
+  "workspace": "/workspace",
+  "viewing": "inputs/vouchers.csv",
+  "mode": "agent",
+  "new_plan": false,
+  "resume_item": null,
+  "shell_timeout": 30.0,
+  "output_limit": 8000
+}

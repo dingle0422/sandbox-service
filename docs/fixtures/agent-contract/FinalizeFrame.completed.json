@@ -1,0 +1,14 @@
+{
+  "type": "__finalize__",
+  "status": "completed",
+  "message": {
+    "info": { "id": "m-1", "role": "assistant" },
+    "parts": [
+      { "id": "p-1", "messageId": "m-1", "type": "text", "text": "已完成初步测算。" }
+    ]
+  },
+  "transcript": [
+    { "role": "assistant", "content": "已完成初步测算。" }
+  ],
+  "interrupt_id": null
+}

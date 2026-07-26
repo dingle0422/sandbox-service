@@ -1,0 +1,15 @@
+{
+  "id": "s-demo-1",
+  "image": "tax-agent:agent-latest",
+  "env": {
+    "SESSION_ID": "s-demo-1",
+    "OWNER_ID": "u-1",
+    "AGENT_TOKEN": "tok-xyz",
+    "ENTERPRISE_ID": "ent-001",
+    "PERIOD": "2026Q2"
+  },
+  "port": 8080,
+  "resource_limits": { "cpu": 2.0, "mem_mb": 2048 },
+  "egress_allow": ["10.199.5.52"],
+  "wait_ready": { "path": "/agent/health", "timeout_s": 90 }
+}

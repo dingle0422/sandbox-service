@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://single-enterprise-tax-agent/protocol/agent-contract.schema.json",
+  "title": "Agent Contract v1.0",
+  "description": "宿主 ↔ 容器内 agent 服务的 HTTP/SSE 契约（docs/protocol/agent-contract.md）。fixture 可为任一 $defs 实例（宽松请求体可命中多个 def，故用 anyOf）。事件流内事件结构由 agent-protocol.schema.json 定义，本 schema 只覆盖端点信封。",
+  "anyOf": [
+    { "$ref": "#/$defs/HealthResponse" },
+    { "$ref": "#/$defs/RunRequest" },
+    { "$ref": "#/$defs/AcceptedResponse" },
+    { "$ref": "#/$defs/CancelRequest" },
+    { "$ref": "#/$defs/CancelResponse" },
+    { "$ref": "#/$defs/MaterializeRequest" },
+    { "$ref": "#/$defs/MaterializeResult" },
+    { "$ref": "#/$defs/ArchiveRequest" },
+    { "$ref": "#/$defs/ArchiveResult" },
+    { "$ref": "#/$defs/FinalizeFrame" }
+  ],
+  "$defs": {
+    "HealthResponse": {
+      "type": "object",
+      "description": "GET /agent/health 响应",
+      "required": ["ok", "contractVersion"],
+      "properties": {
+        "ok": { "const": true },
+        "busy": { "type": "boolean" },
+        "run_id": { "type": ["string", "null"] },
+        "contractVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+$",
+          "description": "契约版本 major.minor；宿主按 major 判兼容"
+        }
+      },
+      "additionalProperties": true
+    },
+    "RunRequest": {
+      "type": "object",
+      "description": "POST /agent/input | /agent/resume 请求体。未知扩展字段必须被容忍。",
+      "required": ["run_id", "session_id"],
+      "properties": {
+        "run_id": { "type": "string", "minLength": 1 },
+        "session_id": { "type": "string", "minLength": 1 },
+        "conversation_id": { "type": ["string", "null"] },
+        "thread_id": { "type": ["string", "null"] },
+        "user_text": { "type": "string" },
+        "history": { "type": ["array", "null"], "items": { "type": "object" } },
+        "model": { "type": ["string", "null"] },
+        "owner_id": { "type": ["string", "null"] },
+        "workspace": { "type": "string", "default": "/workspace" },
+        "resume_item": {
+          "type": ["object", "null"],
+          "description": "非空即 resume 语义；结构见 agent-protocol.schema.json（ResumeItem）"
+        },
+        "mode": { "type": ["string", "null"], "enum": ["agent", "plan", null] },
+        "new_plan": { "type": "boolean", "default": false },
+        "shell_timeout": { "type": "number", "exclusiveMinimum": 0, "default": 30.0 },
+        "output_limit": { "type": "integer", "exclusiveMinimum": 0, "default": 8000 },
+        "enterprise_id": { "type": "string", "description": "[tax] 扩展" },
+        "period": { "type": "string", "description": "[tax] 扩展" },
+        "viewing": { "type": ["string", "null"], "description": "[tax] 扩展" },
+        "references": { "type": ["array", "null"], "description": "[tax] 扩展" }
+      },
+      "additionalProperties": true
+    },
+    "AcceptedResponse": {
+      "type": "object",
+      "description": "input/resume 的 202 响应",
+      "required": ["status", "run_id"],
+      "properties": {
+        "status": { "const": "accepted" },
+        "run_id": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "CancelRequest": {
+      "type": "object",
+      "description": "POST /agent/cancel 请求体",
+      "properties": {
+        "run_id": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "CancelResponse": {
+      "type": "object",
+      "description": "POST /agent/cancel 响应（幂等）",
+      "required": ["ok", "cancelled"],
+      "properties": {
+        "ok": { "const": true },
+        "cancelled": { "type": "boolean" },
+        "run_id": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "MaterializeRequest": {
+      "type": "object",
+      "description": "POST /agent/materialize 请求体（全部可缺省，缺省读容器 env）",
+      "properties": {
+        "owner_id": { "type": ["string", "null"] },
+        "session_id": { "type": ["string", "null"] },
+        "payload_key": { "type": ["string", "null"] },
+        "workspace": { "type": ["string", "null"] },
+        "force": { "type": "boolean", "default": false },
+        "enterprise_id": { "type": ["string", "null"], "description": "[tax] 扩展" },
+        "period": { "type": ["string", "null"], "description": "[tax] 扩展" },
+        "template": { "type": "string", "default": "demo", "description": "[tax] 扩展" }
+      },
+      "additionalProperties": true
+    },
+    "MaterializeResult": {
+      "type": "object",
+      "description": "POST /agent/materialize 200 响应",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["payload", "enterprise", "skipped"] },
+        "bytes_loaded": { "type": "integer", "minimum": 0 },
+        "inputs": { "type": ["array", "null"], "items": { "type": "string" } },
+        "payload_key": { "type": ["string", "null"] },
+        "detail": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "ArchiveRequest": {
+      "type": "object",
+      "description": "POST /agent/archive 请求体",
+      "properties": {
+        "kind": { "enum": ["draft", "version"], "default": "draft" },
+        "owner_id": { "type": ["string", "null"] },
+        "session_id": { "type": ["string", "null"] },
+        "workspace": { "type": ["string", "null"] },
+        "version_id": { "type": ["string", "null"], "description": "[tax] 扩展" },
+        "draft_id": { "type": ["string", "null"], "description": "[tax] 扩展" },
+        "project_id": { "type": ["string", "null"], "description": "[tax] 扩展" }
+      },
+      "additionalProperties": true
+    },
+    "ArchiveResult": {
+      "type": "object",
+      "description": "POST /agent/archive 200 响应",
+      "required": ["payload_key", "changed"],
+      "properties": {
+        "payload_key": { "type": "string", "minLength": 1 },
+        "changed": { "type": "boolean" },
+        "payload_bytes": { "type": "integer", "minimum": 0 },
+        "kind": { "enum": ["draft", "version"] },
+        "version_id": { "type": ["string", "null"] },
+        "draft_id": { "type": ["string", "null"] },
+        "project_id": { "type": ["string", "null"] },
+        "refcount_deltas": {
+          "type": "array",
+          "description": "[tax] blob 引用计数增量",
+          "items": {
+            "type": "object",
+            "required": ["blob_sha", "delta"],
+            "properties": {
+              "blob_sha": { "type": "string" },
+              "delta": { "type": "integer" },
+              "size_bytes": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "blob_shas": { "type": "array", "items": { "type": "string" }, "description": "[tax] 该 payload 引用的全量 uploads blob" }
+      },
+      "additionalProperties": true
+    },
+    "FinalizeFrame": {
+      "type": "object",
+      "description": "SSE 收尾帧（终止事件之后、流关闭之前）",
+      "required": ["type", "status", "message"],
+      "properties": {
+        "type": { "const": "__finalize__" },
+        "status": { "enum": ["completed", "error", "cancelled"] },
+        "message": { "type": "object", "description": "持久化层 Message{info,parts[]}，见 agent-protocol.schema.json" },
+        "transcript": { "type": "array", "items": { "type": "object" } },
+        "interrupt_id": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    }
+  }
+}

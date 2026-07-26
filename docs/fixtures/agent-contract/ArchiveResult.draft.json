@@ -1,0 +1,13 @@
+{
+  "payload_key": "users/u-1/sessions/s-demo-1/payload/20260724-090000.tar.gz",
+  "changed": true,
+  "payload_bytes": 20480,
+  "kind": "draft",
+  "version_id": null,
+  "draft_id": "s-demo-1",
+  "project_id": "p-1",
+  "refcount_deltas": [
+    { "blob_sha": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "delta": 1, "size_bytes": 1024 }
+  ],
+  "blob_shas": ["9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"]
+}
