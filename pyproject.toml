@@ -1,0 +1,40 @@
+# 本仓打包两个可安装包：
+# - sandbox_service：通用沙箱服务（作为服务部署，也可被嵌入/扩展）
+# - std_agent_sdk：agent 契约边界 SDK，给容器内 agent 用（消费方仓库 pip 装它即可）
+#
+#   pip install -e .          # 开发
+#   pip install -e ".[dev]"   # 带测试依赖
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sandbox-service"
+version = "1.0.0"
+description = "业务中立的通用 agent 沙箱服务：容器生命周期 + 通用端点代理 + 工作区快照，对 agent 协议零感知。"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "httpx>=0.27",
+    "docker>=7.0",
+    "minio>=7.2",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "jsonschema>=4", "ruff>=0.5"]
+
+[tool.setuptools]
+# 显式列出，避免 flat-layout 自动发现把 tests/deploy/docs 也当成包
+packages = ["sandbox_service", "std_agent_sdk"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.pytest.ini_options]
+# echo_agent 供 conformance 自启作参考靶子，故也纳入 rootdir 的 import 路径
+pythonpath = ["."]
+testpaths = ["sandbox_service/tests", "std_agent_sdk/tests", "echo_agent/tests", "tests"]

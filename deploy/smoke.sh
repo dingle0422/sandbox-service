@@ -4,8 +4,8 @@
 #   容器 create/start、就绪探测、通用代理（含 SSE 流式）、workspace 文件 CRUD、销毁。
 #
 # 用法（先起编排）：
-#   docker compose -f deploy/sandbox_service/docker-compose.smoke.yml up -d --build
-#   bash deploy/sandbox_service/smoke.sh
+#   docker compose -f deploy/docker-compose.smoke.yml up -d --build
+#   bash deploy/smoke.sh
 set -euo pipefail
 
 BASE="${BASE:-http://localhost:8001}"
