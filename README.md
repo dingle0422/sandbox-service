@@ -17,7 +17,7 @@
 | 目录 | 说明 |
 | --- | --- |
 | `sandbox_service/` | 服务本体。北向 `/sandboxes` 生命周期 API + 通用代理 + 工作区快照 |
-| `std_agent_sdk/` | agent 契约边界 SDK：契约模型 + `AgentSession` 会话替身，零外部依赖 |
+| `sdk/std_agent_sdk/` | agent 契约边界 SDK：契约模型 + `AgentSession` 会话替身，零外部依赖。**独立分发**（`std-agent-sdk`），消费方 pip 装它进自己的 agent 镜像 |
 | `echo_agent/` | 零业务的最小合规 agent，参考实现兼冒烟靶子，接入时可直接照抄 |
 | `tests/agent_conformance/` | agent 侧契约黑盒套件——第三方 agent 的自证工具 |
 | `tests/lifecycle_conformance/` | 沙箱侧契约黑盒套件——换底座（如 OpenSandbox）时的验收锚点 |
@@ -27,7 +27,7 @@
 ## 快速开始
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev]" -e sdk            # 服务本体 + SDK（两个独立分发）
 pytest                                    # 单测 + 两套 conformance（自托管 echo，无需 Docker）
 python scripts/validate_contracts.py      # 契约 schema 与 fixture 校验
 ```

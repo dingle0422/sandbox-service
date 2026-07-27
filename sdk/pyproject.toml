@@ -1,0 +1,26 @@
+# std_agent_sdk 的独立打包定义。
+#
+# 为什么单独一个子项目而不是并入仓库根：SDK 是**消费方仓库要装进 agent 镜像**的东西，
+# 而根分发 `sandbox-service` 依赖 fastapi/uvicorn/docker/minio 且含服务本体源码——
+# 让 agent 镜像装它，等于把沙箱服务塞进被沙箱管理的容器里，方向就反了。
+# 拆成两个分发后消费方只装这一个（零依赖除 pydantic）：
+#
+#   pip install "std-agent-sdk @ git+https://github.com/dingle0422/sandbox-service.git@sdk-v1.0.0#subdirectory=sdk"
+#
+# 版本用 `sdk-v*` 前缀打 tag，与服务本体的版本线分开——两者演进节奏不同。
+# 改动本包务必同步 bump 版本号：消费方钉的是 tag，不 bump 就拿不到新契约。
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "std-agent-sdk"
+version = "1.0.0"
+description = "容器内 agent 的契约边界 SDK：agent-contract v1.0 模型 + AgentSession 会话替身（零依赖沙箱服务与任何业务代码）。"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2"]
+
+[tool.setuptools]
+# 只装包本体；tests/ 是仓内自测用，不进分发
+packages = ["std_agent_sdk"]

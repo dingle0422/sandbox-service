@@ -1,9 +1,12 @@
-# 本仓打包两个可安装包：
-# - sandbox_service：通用沙箱服务（作为服务部署，也可被嵌入/扩展）
-# - std_agent_sdk：agent 契约边界 SDK，给容器内 agent 用（消费方仓库 pip 装它即可）
+# 本仓有**两个独立分发**，各自一份 pyproject：
+# - 本文件 `sandbox-service`：通用沙箱服务本体
+# - `sdk/pyproject.toml` 的 `std-agent-sdk`：agent 契约边界 SDK
 #
-#   pip install -e .          # 开发
-#   pip install -e ".[dev]"   # 带测试依赖
+# 分开的原因见 sdk/pyproject.toml 顶部——消费方（agent 镜像）只该装 SDK，
+# 不该被迫拖上沙箱服务的源码与 fastapi/docker/minio 依赖。
+#
+#   pip install -e . -e sdk        # 开发（两个都装）
+#   pip install -e ".[dev]" -e sdk # 带测试依赖
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -27,14 +30,16 @@ dependencies = [
 dev = ["pytest>=8", "jsonschema>=4", "ruff>=0.5"]
 
 [tool.setuptools]
-# 显式列出，避免 flat-layout 自动发现把 tests/deploy/docs 也当成包
-packages = ["sandbox_service", "std_agent_sdk"]
+# 显式列出，避免 flat-layout 自动发现把 tests/deploy/docs 也当成包。
+# std_agent_sdk 不在此列：它是 sdk/ 下的独立分发（见文件顶部）。
+packages = ["sandbox_service"]
 
 [tool.ruff]
 line-length = 110
 target-version = "py312"
 
 [tool.pytest.ini_options]
-# echo_agent 供 conformance 自启作参考靶子，故也纳入 rootdir 的 import 路径
-pythonpath = ["."]
-testpaths = ["sandbox_service/tests", "std_agent_sdk/tests", "echo_agent/tests", "tests"]
+# echo_agent 供 conformance 自启作参考靶子，故也纳入 rootdir 的 import 路径；
+# sdk/ 是 std_agent_sdk 的项目根，未装包时靠它 import（见 sdk/pyproject.toml）
+pythonpath = [".", "sdk"]
+testpaths = ["sandbox_service/tests", "sdk/std_agent_sdk/tests", "echo_agent/tests", "tests"]

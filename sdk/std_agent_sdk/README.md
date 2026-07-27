@@ -23,13 +23,20 @@
 
 ## 安装
 
+消费方仓库（把本包装进自己的 agent 镜像）钉 tag 装：
+
 ```bash
-# 仓库根
-pip install -e .          # 包名 std-agent-sdk
+pip install "std-agent-sdk @ git+https://github.com/dingle0422/sandbox-service.git@sdk-v1.0.0#subdirectory=sdk"
+```
+
+本仓开发：
+
+```bash
+pip install -e sdk        # 从仓库根执行；包名 std-agent-sdk
 ```
 
 ## 测试
 
 ```bash
-python -m pytest std_agent_sdk/tests -q
+python -m pytest sdk/std_agent_sdk/tests -q
 ```
