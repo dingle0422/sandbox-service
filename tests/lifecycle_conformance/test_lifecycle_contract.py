@@ -25,6 +25,18 @@ def test_capacity_shape(lc):
     assert isinstance(r.json(), dict)
 
 
+def test_image_prewarm_is_async_and_queryable(lc):
+    """§2.1.1：预热必须立刻返回（202），且状态可查——否则调用方启动时会被拉取阻塞。"""
+    r = lc.post("/images", json={})
+    assert r.status_code == 202, r.text
+    image = r.json()["image"]
+    assert r.json()["state"] in ("pulling", "present")
+
+    r = lc.get("/images", params={"image": image})
+    assert r.status_code == 200
+    assert r.json()["state"] in ("pulling", "present", "failed", "absent")
+
+
 # —— 沙箱 CRUD ────────────────────────────────────────────────────────────────
 def test_create_status_and_delete_idempotent(lc, ready_sandbox):
     sid = ready_sandbox

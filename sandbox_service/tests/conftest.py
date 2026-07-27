@@ -30,6 +30,23 @@ class FakeBackend:
         self.stop_fails = False  # 模拟 docker stop 失败，验证不会静默漏容器
         self.reaped: list[frozenset[str]] = []
         self._n = 0
+        # 缺省「镜像都在」，免得每个建沙箱的用例都被拉取路径干扰；
+        # 想验拉取的用例置 images_present=False 即可
+        self.images_present = True
+        self.images: set[str] = set()
+        self.pulled: list[str] = []
+        self.pull_fails = False
+
+    def has_image(self, image: str) -> bool:
+        return self.images_present or image in self.images
+
+    def pull_image(self, image: str) -> None:
+        if self.pull_fails:
+            from sandbox_service.backend import ImagePullError
+
+            raise ImagePullError(f"pull failed image={image}")
+        self.pulled.append(image)
+        self.images.add(image)
 
     def create(self, spec) -> str:
         self._n += 1

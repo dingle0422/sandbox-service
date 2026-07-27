@@ -31,6 +31,12 @@ class _FakeBackend:
         self.containers: dict[str, dict] = {}
         self._n = 0
 
+    def has_image(self, image: str) -> bool:
+        return True  # 假后端不涉真镜像：一律视为已就位，不触发拉取
+
+    def pull_image(self, image: str) -> None:
+        return None
+
     def create(self, spec) -> str:
         self._n += 1
         cid = f"c{self._n:04d}"

@@ -13,6 +13,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 import sandbox_service
+from sandbox_service.backend import ImagePullError
 from sandbox_service.config import session_paths
 from sandbox_service.pool import SandboxCreateError
 from sandbox_service.proxy import UpstreamUnreachableError, proxy_request
@@ -38,6 +39,11 @@ API_VERSION = "1.0"
 class WaitReady(BaseModel):
     path: str = "/agent/health"
     timeout_s: float = 90.0
+
+
+class PrewarmImageReq(BaseModel):
+    #: 省略＝预热部署级缺省镜像（AGENT_IMAGE）
+    image: Optional[str] = None
 
 
 class ResourceLimits(BaseModel):
@@ -86,6 +92,32 @@ def build_router(state: ServiceState) -> APIRouter:
     def capacity() -> dict:
         return state.pool.stats()
 
+    # ── 镜像预热 ─────────────────────────────────────────────────────────────
+    # 跨机部署下 agent 镜像经 registry 分发。调用方发版后打这里一次，即可让沙箱机
+    # 提前把新 tag 拉好，不必人工登机器 docker pull，也避免第一个用户等几分钟。
+    # 仍是**被动**接口：服务不知道谁在发版、也不去轮询任何仓库，只按请求拉指定镜像。
+    @router.post("/images", status_code=202)
+    def prewarm_image(req: PrewarmImageReq) -> dict:
+        image = req.image or s.agent_image
+        pull = state.start_image_pull(image)
+        return {"image": image, **pull.as_dict()}
+
+    @router.get("/images")
+    def image_status(image: Optional[str] = None) -> dict:
+        target = image or s.agent_image
+        pull = state.image_pull_status(target)
+        if pull is not None:
+            return pull.as_dict()
+        # 没拉过 ≠ 不存在：可能是本机早就有（人工 load/build 过）
+        present = state.pool.backend.has_image(target)
+        return {
+            "image": target,
+            "state": "present" if present else "absent",
+            "startedAt": None,
+            "finishedAt": None,
+            "error": None,
+        }
+
     # ── 沙箱生命周期 ─────────────────────────────────────────────────────────
     @router.post("/sandboxes")
     def create_sandbox(req: CreateSandboxReq) -> dict:
@@ -102,6 +134,14 @@ def build_router(state: ServiceState) -> APIRouter:
             egress_allow=req.egress_allow,
         )
         meta = {"callback_url": req.callback_url} if req.callback_url else None
+        # 镜像必须先在本机就位：docker create 不会自动拉，缺镜像直接 ImageNotFound。
+        # 若预热（POST /images）尚未跑完，这里会在同一把镜像锁上等它——代价是本请求可能
+        # 耗时数分钟（调用方超时风险），所以部署时应先预热。
+        try:
+            state.ensure_image(spec.image)
+        except ImagePullError as exc:
+            logger.error("镜像就位失败 id=%s image=%s: %s", req.id, spec.image, exc)
+            raise HTTPException(status_code=502, detail="image_pull_failed") from exc
         try:
             result = state.pool.acquire(req.id, spec, meta=meta)
         except SandboxCreateError as exc:

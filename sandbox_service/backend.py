@@ -31,6 +31,10 @@ class ContainerStopError(RuntimeError):
     """停止/移除后容器仍然存在——必须让调用方感知并重试，不能静默当成功。"""
 
 
+class ImagePullError(RuntimeError):
+    """镜像拉取失败（registry 不可达 / tag 不存在 / 未放行明文 registry）。"""
+
+
 #: 创建容器时剔除的敏感 env（禁止把真实 LLM key/平台凭据注入沙箱）
 _ENV_DENYLIST = frozenset({"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "LLM_API_KEY_REAL"})
 
@@ -86,6 +90,8 @@ class ContainerSpec:
 class ContainerBackend(Protocol):
     def create(self, spec: ContainerSpec) -> str: ...
     def start(self, container_id: str) -> None: ...
+    def has_image(self, image: str) -> bool: ...
+    def pull_image(self, image: str) -> None: ...
     def stop(self, container_id: str, timeout: float = 5.0) -> None: ...
     def stop_for_sandbox(self, sandbox_id: str) -> int: ...
     def inspect(self, container_id: str) -> ContainerStatus: ...
@@ -110,6 +116,34 @@ class DockerBackend:
 
             self._client = from_env()
         return self._client
+
+    # ── 镜像 ─────────────────────────────────────────────────────────────────
+    def has_image(self, image: str) -> bool:
+        """本机是否已有该镜像。``containers.create`` 不会自动拉，缺镜像会直接 ImageNotFound。"""
+        from docker.errors import ImageNotFound
+
+        try:
+            self._cli().images.get(image)
+            return True
+        except ImageNotFound:
+            return False
+
+    def pull_image(self, image: str) -> None:
+        """从 registry 拉镜像（阻塞，几百 MB 可能数分钟）。
+
+        失败原因绝大多数是部署问题而非代码问题（registry 未起、tag 拼错、宿主机
+        ``daemon.json`` 未把明文 registry 加进 ``insecure-registries``——后者报的是 TLS 错），
+        所以原文透传进异常消息，别包装成笼统的「拉取失败」。
+        """
+        # docker-py 的 pull 要求 tag 与仓库名分开传，否则 "host:5000/x:tag" 里的端口冒号会被误当 tag
+        repo, _, tag = image.rpartition(":")
+        if not repo or "/" in tag:
+            repo, tag = image, "latest"
+        try:
+            self._cli().images.pull(repo, tag=tag)
+        except Exception as exc:  # noqa: BLE001
+            raise ImagePullError(f"拉取 {image} 失败：{exc}") from exc
+        logger.info("镜像已拉取 image=%s", image)
 
     # ── 生命周期 ─────────────────────────────────────────────────────────────
     def create(self, spec: ContainerSpec) -> str:

@@ -44,6 +44,10 @@ class Settings:
 
     # 容器缺省 spec（可被 POST /sandboxes 请求体覆盖）
     agent_image: str = "tax-agent:agent-latest"
+    #: 起容器前的镜像拉取策略。跨机部署下镜像由 registry 分发，而 docker create **不会**
+    #: 自动拉——缺镜像直接 ImageNotFound，故默认 ``missing``（本地没有才拉，稳态零开销）。
+    #: ``always``＝每次都查 registry 摘要（配滚动 tag 如 :latest 用）；``never``＝完全不拉。
+    image_pull_policy: str = "missing"
     agent_port: int = 8080
     agent_cpu: float = 2.0
     agent_mem_mb: int = 2048
@@ -69,6 +73,23 @@ class Settings:
     enable_legacy_shim: bool = True
 
 
+#: 合法拉取策略；非法值回落 missing（配错不该让服务起不来，但要留日志）
+_PULL_POLICIES = frozenset({"missing", "always", "never"})
+
+
+def _pull_policy() -> str:
+    raw = _s("AGENT_IMAGE_PULL_POLICY", "missing").lower()
+    if raw in _PULL_POLICIES:
+        return raw
+    import logging
+
+    logging.getLogger("sandbox_service.config").warning(
+        "AGENT_IMAGE_PULL_POLICY=%r 非法（合法值 %s），回落 missing",
+        raw, ", ".join(sorted(_PULL_POLICIES)),
+    )
+    return "missing"
+
+
 def load_settings() -> Settings:
     def _csv(name: str, default: str = "") -> list[str]:
         return [x.strip() for x in _s(name, default).split(",") if x.strip()]
@@ -85,6 +106,7 @@ def load_settings() -> Settings:
         orphan_sweep_seconds=_f("ORPHAN_SWEEP_SECONDS", 60.0),
         orphan_min_age_seconds=_f("ORPHAN_MIN_AGE_SECONDS", 120.0),
         agent_image=_s("AGENT_IMAGE") or _s("CONTAINER_IMAGE", "tax-agent:agent-latest"),
+        image_pull_policy=_pull_policy(),
         agent_port=_i("AGENT_PORT", 8080),
         agent_cpu=_f("AGENT_CPU", 2.0),
         agent_mem_mb=_i("AGENT_MEM_MB", 2048),

@@ -51,6 +51,29 @@ Sandbox（沙箱）
 | GET | `/health` | `{ok, apiVersion, image?}`（公开） |
 | GET | `/capacity` | 池统计：`{live, leased, idle, capacity, idleTtl, evict_candidates[]}` |
 
+### 2.1.1 镜像预热
+
+跨机部署下镜像由 registry 分发，而 `docker create` **不会**自动拉——缺镜像直接失败。
+发版方（应用层）推完新 tag 后打这里一次，沙箱机就把镜像提前拉好，无需人工登机器 `docker pull`，
+也避免把几分钟的拉取压到第一个用户的建沙箱请求上。
+
+服务仍然**被动**：它不知道谁在发版、不轮询任何仓库，只按请求拉指定镜像。
+
+| 方法 | 路径 | 语义 |
+| --- | --- | --- |
+| POST | `/images` | `{image?}`（缺省 `AGENT_IMAGE`）→ **202** 立刻返回，后台拉取。幂等：已就位回 `present`，在拉则复用同一次，不会并发拉两遍 |
+| GET | `/images?image=…` | `{image, state, startedAt, finishedAt, error}`，`state ∈ pulling｜present｜failed｜absent` |
+
+`absent` = 本机没有且本进程没拉过；`present` 也可能来自人工 `build`/`load`，不代表拉过。
+
+**必须异步**：拉几百 MB 要数分钟，调用方（如应用后端的启动钩子）不能被阻塞。
+想彻底消掉「镜像还在拉时已有用户进来」的窗口，就在部署脚本里轮 `GET /images` 等到
+`present` 再放流量。
+
+建沙箱路径按 `AGENT_IMAGE_PULL_POLICY`（§3）兜底：缺镜像时同步拉，
+且与预热共用同一把镜像锁——预热没跑完就来请求，会等它拉完而非重复拉，
+代价是该请求可能耗时数分钟（调用方超时风险，故仍应先预热）。
+
 ### 2.2 沙箱生命周期
 
 **`POST /sandboxes`** —— 创建（或幂等复用）沙箱：
@@ -154,6 +177,7 @@ DELETE 的销毁结果**以容器运行时为准，不以服务内存账本为�
 | `SERVICE_TOKEN` | 北向 Bearer token（兼容读 `VM2_SERVICE_TOKEN`） |
 | `SANDBOX_WORKSPACE_ROOT` | 工作区根（宿主机同路径 bind 约束不变） |
 | `AGENT_IMAGE` | 缺省镜像 |
+| `AGENT_IMAGE_PULL_POLICY` | 起容器前拉取策略：`missing`（缺省，本地没有才拉）｜`always`（每次查 registry，配滚动 tag 用）｜`never`（完全不拉）。非法值回落 `missing` |
 | `AGENT_COMMAND` | 缺省空 = 用镜像 CMD；`legacy` = 注入 uvicorn 命令（过渡一个版本） |
 | `AGENT_PORT` / `AGENT_CPU` / `AGENT_MEM_MB` | 缺省端口/资源 |
 | `AGENT_CODE_MOUNTS` | 热挂载列表 `host:container:ro[,…]`（泛化 `AGENT_CODE_DIR`） |
