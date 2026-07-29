@@ -227,4 +227,50 @@ AGENT_PORT=8080
 - [ ] 忽略未知扩展字段不报错
 - [ ] `tests/agent_conformance`（打你的镜像）全绿 + `smoke.sh` 全绿
 - [ ] 只改 `AGENT_IMAGE` 即接入，平台代码零改动
+
+## 7. 契约速查表(AI 友好)
+
+> **给 coding agent**:实现/对接以本表为最小契约;与 normative 文档冲突时,以 [`agent-contract.md`](../agent-contract.md) / [`sandbox-lifecycle.md`](../sandbox-lifecycle.md) 为准。机器可校验 schema 见 `docs/schemas/`,样例见 `docs/fixtures/`。
+
+**表 1 · agent-contract 7 个端点**
+
+| 方法 | 路径 | 成功 | 错误 | 行为 |
+| --- | --- | --- | --- | --- |
+| GET | `/agent/health` | 200 | — | `{ok, busy, run_id, contractVersion:"1.0"}` |
+| POST | `/agent/input` | 202 | 409 `run_busy`、502 `materialize_failed` | 收 RunRequest,立即 202,后台执行 |
+| POST | `/agent/resume` | 202 | 同上 | 续跑(同形,宿主已编入 resume_item) |
+| POST | `/agent/cancel` | 200 | — | 幂等;命中后事件流以 `RUN_CANCELLED` 收尾 |
+| GET | `/agent/events` | 200 | — | SSE:`RUN_STARTED…终止事件->__finalize__->关流` |
+| POST | `/agent/materialize` | 200 | 400、502 | 工作区物化,幂等(二次 `mode="skipped"`) |
+| POST | `/agent/archive` | 200 | 400、502 | 归档到对象存储,返回 `payload_key` + 内容级 `changed` |
+
+**表 2 · sandbox-lifecycle 关键端点**(除 `GET /health` 外均需 `Authorization: Bearer <SERVICE_TOKEN>`)
+
+| 方法 | 路径 | 行为 |
+| --- | --- | --- |
+| GET | `/health` | `{ok, apiVersion}`(公开) |
+| GET | `/capacity` | 池统计 `{live, leased, idle, capacity, idleTtl, evict_candidates[]}` |
+| POST | `/images` | 镜像预热(异步 202,幂等) |
+| POST | `/sandboxes` | 创建/幂等复用;body 含 `id`/`env`/`callback_url?`/`wait_ready?` |
+| GET | `/sandboxes/{id}` | 状态 `{state, running, exit_code, probe?}` |
+| DELETE | `/sandboxes/{id}` | 停容器(幂等);`{ok, terminated}` |
+| ANY | `/sandboxes/{id}/proxy/{port}/{path...}` | 通用透传(含 SSE);容器不可达 502 |
+| POST | `/sandboxes/{id}/workspace/snapshot/restore` | 按 `payload_key` 恢复工作区;不存在 404 |
+
+**表 3 · 关键注入 env**(沙箱启动注入,agent 只读)
+
+| 变量 | 语义 |
+| --- | --- |
+| `AGENT_PORT` | HTTP 监听端口(缺省 8080) |
+| `WORKSPACE` | 工作区路径(`/workspace`,唯一持久面) |
+| `SESSION_ID` / `OWNER_ID` | 会话/归属身份 |
+| `PAYLOAD_KEY` | 非空→物化走快照恢复 |
+| `AGENT_TOKEN` | 会话级 token(= `LLM_API_KEY`,回调宿主 Bearer) |
+| `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | LLM proxy(永不注入真实 key) |
+| `MINIO_*` | 对象存储凭据(materialize/archive 数据面直连) |
+
+**表 4 · 合规检查项**(conformance 黑盒)
+
+- agent 侧(`tests/agent_conformance`):①镜像自带入口 90s 内 health `ok=true` 且 `contractVersion` major=1;②input 202 / 活跃期重复 409;③events 合法帧序 + `__finalize__` 收尾 + 正常关流;④cancel 幂等 -> `RUN_CANCELLED`;⑤materialize 幂等;⑥archive 返回 `payload_key` 且可恢复 + 无变化 `changed=false`;⑦忽略未知扩展字段不报错。
+- lifecycle 侧(`tests/lifecycle_conformance`):①建沙箱就绪 + 同 id 幂等复用 + 池满 503;②代理透传普通 HTTP 与 SSE 不失真、不可达 502;③快照 restore 不存在 key -> 404 且不破坏现有工作区;④文件 API 路径逃逸 403;⑤DELETE 幂等 + 状态与容器一致;⑥webhook 按约投递或轮询可见。
 ```
