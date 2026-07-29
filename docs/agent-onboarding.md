@@ -90,9 +90,9 @@ docker run -d --name my-agent -p 8080:8080 your-agent:latest
 AGENT_BASE_URL=http://localhost:8080 python -m pytest tests/agent_conformance -q
 
 # ② 端到端冒烟：换 AGENT_IMAGE 走沙箱通用路径（create/代理/SSE/workspace/lifecycle）
-#    仿 deploy/sandbox_service/docker-compose.smoke.yml，把 echo-agent 换成 your-agent:latest
-docker compose -f deploy/sandbox_service/docker-compose.smoke.yml up -d --build
-bash deploy/sandbox_service/smoke.sh
+#    仿 deploy/docker-compose.smoke.yml，把 echo-agent 换成 your-agent:latest
+docker compose -f deploy/docker-compose.smoke.yml up -d --build
+bash deploy/smoke.sh
 ```
 
 合规最小标准见 `agent-contract.md` §6（health/202/409、SSE 收尾、cancel 幂等、materialize 幂等、archive 可恢复 + 查重、容忍未知字段）。全绿即「合规 agent」。
@@ -103,7 +103,7 @@ bash deploy/sandbox_service/smoke.sh
 
 平台代码零改动，切换只动部署变量：
 
-**新路径（推荐，业务中立 `sandbox_service`）** —— 改 `deploy/sandbox_service/.env`：
+**新路径（推荐，业务中立 `sandbox_service`）** —— 改 `deploy/.env`：
 
 ```dotenv
 AGENT_IMAGE=your-agent:latest
@@ -113,9 +113,7 @@ AGENT_PORT=8080
 WORKSPACE_SKELETON_DIRS=
 ```
 
-重启 `sandbox_service` 即生效；vm1 侧无需改动（会话/归档/webhook 全走通用协议）。会话侧接新路径见 [`../delivery/p2.8-sandbox-service-cutover.md`](../delivery/p2.8-sandbox-service-cutover.md)。
-
-**旧路径（过渡期 `sandbox_manager`）**：改 `deploy/sandbox_manager/.env` 的 `AGENT_IMAGE`（同样 `AGENT_COMMAND` 留空用镜像 CMD）。
+重启 `sandbox_service` 即生效；vm1 侧无需改动（会话/归档/webhook 全走通用协议）。
 
 > 版本协商：`/agent/health` 的 `contractVersion` major 必须 = 1，否则宿主判 `agent_contract_mismatch` 拒绝接入（`agent-contract.md` §0.1）。
 
