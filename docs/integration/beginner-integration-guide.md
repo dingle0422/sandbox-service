@@ -102,3 +102,48 @@ CMD ["sh", "-c", "uvicorn your_agent.app:app --host 0.0.0.0 --port ${AGENT_PORT:
 ```bash
 docker build -t your-agent:latest -f your_agent/Dockerfile .
 ```
+
+### 3.5 一个 run 的生命周期
+
+从建沙箱到销毁,一次完整对话长这样(细节见 [`agent-contract.md`](../agent-contract.md) §3):
+
+```mermaid
+sequenceDiagram
+    participant Host as 应用层
+    participant SBX as 沙箱服务
+    participant Agent as agent 容器
+    Host->>SBX: POST /sandboxes（建沙箱）
+    SBX->>Agent: create + start（镜像 CMD 自启）
+    loop 就绪轮询 ≤90s
+        SBX->>Agent: GET /agent/health
+        Agent-->>SBX: {ok:true, contractVersion:"1.0"}
+    end
+    SBX-->>Host: status: ready
+    Host->>SBX: POST .../proxy/8080/agent/input
+    SBX->>Agent: 透传 input
+    Agent-->>Host: 202 accepted
+    Host->>SBX: GET .../proxy/8080/agent/events (SSE)
+    SBX-->>Host: RUN_STARTED … RUN_FINISHED
+    SBX-->>Host: __finalize__ {message, transcript, interrupt_id}
+    opt 归档（run 终态 / 逐出前）
+        Host->>SBX: POST .../proxy/8080/agent/archive
+        SBX->>Agent: 透传 archive
+        Agent-->>Host: {payload_key, changed}
+    end
+    Host->>SBX: DELETE /sandboxes/{id}
+    SBX->>Agent: stop
+```
+
+关键:agent 收 input **立即 202**,活儿在后台跑,产物经 `/agent/events` SSE 流出;流末尾必有 `__finalize__` 信封(宿主据此落库);活跃期重复 input 返回 409。
+
+### 3.6 验证合规(黑盒,换靶子即可)
+
+平台提供黑盒 conformance,**直接打你的 agent**,无需信任你的内部实现:
+
+```bash
+# 起你的容器后,指向它跑 agent 契约套件
+docker run -d --name my-agent -p 8080:8080 your-agent:latest
+AGENT_BASE_URL=http://localhost:8080 python -m pytest tests/agent_conformance -q
+```
+
+全绿即「合规 agent」。合规最小标准见 [`agent-contract.md`](../agent-contract.md) §6:health 90s 就绪且契约版本 major=1、input 202/409、SSE 收尾、cancel 幂等、materialize 幂等、archive 可恢复 + 查重、忽略未知字段。
