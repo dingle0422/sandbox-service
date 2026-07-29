@@ -51,6 +51,7 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
 
 ## 接入一个新 agent
 
+新手入门先看 [`docs/integration/beginner-integration-guide.md`](docs/integration/beginner-integration-guide.md)(线性旅程)或 [按角色版](docs/integration/integration-guide-by-role.md)。
 实现契约要求的七个端点，通过 `tests/agent_conformance`，然后把 `AGENT_IMAGE` 指向你的镜像
 ——沙箱服务与调用方都不用改代码。完整步骤见 [docs/agent-onboarding.md](docs/agent-onboarding.md)，
 协议细节见 [docs/agent-contract.md](docs/agent-contract.md) 与

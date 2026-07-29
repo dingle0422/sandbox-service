@@ -1,6 +1,7 @@
 # Agent 接入指南（Agent Onboarding）
 
 > 状态：Informative · 读者：想把**自己的 agent** 接入本沙箱系统的开发者
+> 新手入门:先看 [`integration/beginner-integration-guide.md`](integration/beginner-integration-guide.md),再回本文看协议细节。
 > 权威契约：[`agent-contract.md`](agent-contract.md)（Normative）· 生命周期：[`sandbox-lifecycle.md`](sandbox-lifecycle.md)
 > 参考实现：仓库根 [`echo_agent/`](../../echo_agent/)（零业务最小合规 agent）
 
