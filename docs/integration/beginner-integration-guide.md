@@ -147,3 +147,58 @@ AGENT_BASE_URL=http://localhost:8080 python -m pytest tests/agent_conformance -q
 ```
 
 全绿即「合规 agent」。合规最小标准见 [`agent-contract.md`](../agent-contract.md) §6:health 90s 就绪且契约版本 major=1、input 202/409、SSE 收尾、cancel 幂等、materialize 幂等、archive 可恢复 + 查重、忽略未知字段。
+
+## 4. 应用层接线
+
+### 4.1 鉴权与基址
+
+- 基址:`http://<sandbox-service-host>:8001`。
+- 鉴权:除 `GET /health` 外所有端点带 `Authorization: Bearer <SERVICE_TOKEN>`。
+
+### 4.2 建沙箱
+
+`POST /sandboxes`,关键字段:`id`(你的稳定标识,本仓场景=会话 id)、`env`(不透明透传,服务不解析)、`callback_url`(本沙箱事件回调,可选)。对同一 `id` 幂等--已有活容器直接复用。
+
+```bash
+curl -X POST http://localhost:8001/sandboxes \
+  -H "Authorization: Bearer $SERVICE_TOKEN" \
+  -d '{"id":"s-123","env":{"SESSION_ID":"s-123","AGENT_TOKEN":"…"},"callback_url":"https://app/hooks/sandbox"}'
+```
+
+### 4.3 跟 agent 说话(经通用代理)
+
+应用层不直连容器,而是经沙箱服务的通用代理转发到容器内 `/agent/*`:
+
+- 提交 run:`POST /sandboxes/{id}/proxy/8080/agent/input`
+- 收事件流:`GET /sandboxes/{id}/proxy/8080/agent/events`(SSE 透传,不缓冲)
+
+方法、请求体、响应、状态码全透传;容器不可达返回 502。agent 协议内容沙箱服务零感知。
+
+### 4.4 用完回收(三层防线)
+
+沙箱不会自己关容器,关不关最终由应用层是否调 `DELETE /sandboxes/{id}` 决定。三层防线:
+
+| 防线 | 谁触发 | 干什么 | 你要做的 |
+| --- | --- | --- | --- |
+| L1 退出即销毁 | 应用层(业务事件) | 用户退出工作空间时主动 DELETE | **主路径,必须接** |
+| L2 空闲兜底 | 沙箱通知 + 应用层消费 | 空闲超 TTL 发 `evict_candidate` webhook,你收到后**先归档再 DELETE** | 配 callback_url + 收 webhook + 轮询 `/capacity` 兜底 |
+| L3 孤儿巡检 | 沙箱服务自管 | 回收账本外的残留容器 | 不用管 |
+
+要点:L2 的 webhook 是**尽力而为**(可能丢),所以必须同时轮询 `GET /capacity` 兜底;`evict_candidate` 后**先经代理归档、成功再 DELETE**,归档失败不删,避免丢数据。
+
+### 4.5 回收时序
+
+```mermaid
+sequenceDiagram
+    participant App as 应用层
+    participant SBX as 沙箱服务
+    participant Agent as agent 容器
+    Note over SBX: 空闲超 IDLE_TTL（默认 600s）
+    SBX-->>App: webhook {kind:"evict_candidate", sandbox_id}
+    App->>SBX: POST .../proxy/8080/agent/archive（先抢救归档）
+    SBX->>Agent: 透传 archive
+    Agent-->>App: {payload_key, changed}
+    App->>SBX: DELETE /sandboxes/{id}（归档成功后再删）
+    SBX->>Agent: stop
+    Note over App: 归档失败不删，转重试/人工
+```
