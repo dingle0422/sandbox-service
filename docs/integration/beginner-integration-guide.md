@@ -201,4 +201,30 @@ sequenceDiagram
     App->>SBX: DELETE /sandboxes/{id}（归档成功后再删）
     SBX->>Agent: stop
     Note over App: 归档失败不删，转重试/人工
+
+## 5. 上线(只改 .env)
+
+平台代码零改动,切换只动部署变量。改 `deploy/.env`:
+
+```dotenv
+AGENT_IMAGE=your-agent:latest
+AGENT_COMMAND=          # 留空 = 用镜像 CMD
+AGENT_PORT=8080
+```
+
+重启 `sandbox_service` 即生效。
+
+> 版本协商:`/agent/health` 的 `contractVersion` major 必须 = 1,否则宿主判 `agent_contract_mismatch` 拒绝接入(见 [`agent-contract.md`](../agent-contract.md) §0.1)。
+
+## 6. 接入验收清单
+
+- [ ] 镜像自带 CMD，起容器 90s 内 `/agent/health` `ok=true` 且 `contractVersion` major=1
+- [ ] `/agent/input` 202；活跃期重复 409 `run_busy`
+- [ ] `/agent/events` 帧序合法，终止事件 + `__finalize__` 收尾、正常关流
+- [ ] `/agent/cancel` 幂等，取消后 `RUN_CANCELLED`
+- [ ] `/agent/materialize` 幂等（二次 `skipped`）
+- [ ] `/agent/archive` 返回 `payload_key`，以该 key 重物化可恢复等价工作区；无变化 `changed=false`
+- [ ] 忽略未知扩展字段不报错
+- [ ] `tests/agent_conformance`（打你的镜像）全绿 + `smoke.sh` 全绿
+- [ ] 只改 `AGENT_IMAGE` 即接入，平台代码零改动
 ```
