@@ -65,7 +65,7 @@ docker compose -f deploy/docker-compose.smoke.yml down
 | POST | `/agent/input` | 收 RunRequest,**立即 202**,后台执行;活跃期重复 -> 409 |
 | POST | `/agent/resume` | 续跑(同 input,宿主已把审批编进 resume_item) |
 | POST | `/agent/cancel` | 幂等取消;事件流以 `RUN_CANCELLED` 收尾 |
-| GET | `/agent/events` | SSE:`RUN_STARTED … 终止事件 -> __finalize__ -> 关流` |
+| GET | `/agent/events` | SSE: `RUN_STARTED … 终止事件 -> __finalize__ -> 关流` |
 | POST | `/agent/materialize` | 工作区物化,**幂等**(二次 `mode="skipped"`) |
 | POST | `/agent/archive` | 归档到对象存储,返回 `payload_key` + 内容级 `changed` |
 
@@ -237,7 +237,7 @@ AGENT_PORT=8080
 | POST | `/agent/input` | 202 | 409 `run_busy`、502 `materialize_failed` | 收 RunRequest,立即 202,后台执行 |
 | POST | `/agent/resume` | 202 | 同上 | 续跑(同形,宿主已编入 resume_item) |
 | POST | `/agent/cancel` | 200 | — | 幂等;命中后事件流以 `RUN_CANCELLED` 收尾 |
-| GET | `/agent/events` | 200 | — | SSE:`RUN_STARTED…终止事件->__finalize__->关流` |
+| GET | `/agent/events` | 200 | — | SSE: `RUN_STARTED…终止事件->__finalize__->关流` |
 | POST | `/agent/materialize` | 200 | 400、502 | 工作区物化,幂等(二次 `mode="skipped"`) |
 | POST | `/agent/archive` | 200 | 400、502 | 归档到对象存储,返回 `payload_key` + 内容级 `changed` |
 
