@@ -45,7 +45,7 @@
 | 启动 | 镜像自带入口（CMD/ENTRYPOINT）拉起服务；宿主不注入启动命令（legacy 模式除外，见 `sandbox-lifecycle.md`） |
 | 就绪 | 宿主轮询 `GET /agent/health` 直至 `ok=true`（默认超时 90s，间隔 0.5s）；超时即判 `agent_not_ready` 并停容器 |
 | 并发 | **单容器单活跃 run**：有活跃 run 时新 input/resume 返回 409 `run_busy` |
-| 工作区 | `/workspace` 为会话工作区（宿主 bind mount）；agent 对其有全量读写权 |
+| 工作区 | 宿主会话根 bind mount 到 `/session`；`/session/workspace` 为业务工作区，agent 对其有全量读写权 |
 | 认证 | 容器内端点不做鉴权（网络边界由沙箱服务保证：bridge 网络 + egress 白名单） |
 
 ## 2. 端点总览
@@ -89,7 +89,7 @@
 | `history` | object[]? | 核心 | 模型侧对话历史（宿主装载；agent 不自行持久化对话） |
 | `model` | string? | 核心 | 模型标识（经 LLM proxy 解析） |
 | `owner_id` | string? | 核心 | 归属用户（数据面归档/物化用） |
-| `workspace` | string | 核心 | 工作区路径，容器内恒为 `"/workspace"` |
+| `workspace` | string | 核心 | 工作区路径，容器内恒为 `"/session/workspace"` |
 | `resume_item` | object? | 核心 | 非空即 resume 语义：agent 自行 apply（落盘副作用）+ 合成续跑指令；结构见 `agent-protocol.schema.json#/$defs/ResumeItem` |
 | `mode` | string? | 核心 | 运行模式（`agent` 默认 / `plan`） |
 | `new_plan` | boolean | 核心 | 强制新开计划任务 |
@@ -237,8 +237,8 @@ sequenceDiagram
 | 变量 | 档位 | 语义 |
 | --- | --- | --- |
 | `AGENT_PORT` | 核心 | HTTP 监听端口（缺省 8080） |
-| `WORKSPACE` | 核心 | 工作区路径（`/workspace`） |
-| `DEBUG_DIR` | 核心 | 调试产物目录（`/tmp/debug`） |
+| `WORKSPACE` | 核心 | 工作区路径（`/session/workspace`） |
+| `DEBUG_DIR` | 核心 | 调试产物目录（`/session/debug`） |
 | `SESSION_ID` / `OWNER_ID` | 核心 | 会话/归属身份（物化归档缺省值） |
 | `PROJECT_ID` | 核心 | 项目归属（可缺省） |
 | `PAYLOAD_KEY` | 核心 | 非空 → 启动物化走快照恢复 |
@@ -253,9 +253,9 @@ sequenceDiagram
 
 ## 5. 文件系统契约
 
-- `/workspace` 为唯一持久化数据面；容器其余文件系统视为易失。
+- `/session` 为会话持久化数据面；业务工具和文件 API 仍只加载 `/session/workspace`。
 - 目录骨架（物化时创建）：`inputs/`（企业数据）、`knowledge/`（知识库）、`uploads/`（用户上传，归档时按内容 sha 去重为 blob）、`.agent/`（agent 私有状态：`materialized.json` 物化标记、`archive-manifest.json` 归档查重基线、任务/覆盖状态等）。
-- 归档范围：`/workspace` 全量，排除 `.agent/` 内部查重清单等实现细节（见 `PAYLOAD_EXCLUDE_RELS`）。
+- payload v2 归档范围：`/session/workspace`、`/session/debug` 与会话根下点前缀条目；上传字节仍按 blob 存储。
 
 ## 6. 合规性（Conformance）
 

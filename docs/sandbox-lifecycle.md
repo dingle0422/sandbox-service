@@ -37,7 +37,7 @@ Sandbox（沙箱）
  ├─ container_id  = 运行时容器 id（服务内部产物，north API 同时接受两者定位）
  ├─ spec          = 镜像/入口/端口/资源/env/挂载（创建时给定）
  ├─ state         = creating | running | idle | evict_candidate | dead | terminated
- └─ workspace     = 服务本地目录，bind mount 到容器 /workspace
+ └─ session root  = 服务本地目录，bind mount 到容器 /session（工作区为 /session/workspace）
 ```
 
 - **keep-warm 池语义**：`POST /sandboxes` 对同一 `id` 幂等——已有活容器则直接复用返回；池满返回 503 `capacity_full`；空闲超 TTL 进入 `evict_candidate`（只标记，不自行销毁，由调用方决策，见 §2.6 webhook）。
@@ -128,7 +128,7 @@ DELETE 的销毁结果**以容器运行时为准，不以服务内存账本为�
 | POST | `/sandboxes/{id}/workspace/snapshot/restore` | `{payload_key, scope?, blob_key_template?}`：从对象存储把快照重灌工作区（快照不存在 → 404 `payload_missing`；`scope.preserve[]` 顶层保留项，缺省 `["knowledge",".agent"]`） |
 | POST | `/sandboxes/{id}/workspace/import` | multipart tar.gz 覆盖导入 |
 
-快照格式约定（informative）：tar 内若带 `uploads-meta/upload-log.json`（`{rel: sha}`），且请求提供 `blob_key_template`（如 `users/u1/blobs/{sha2}/{sha}`，占位符 `{sha}`/`{sha2}`），服务逐条从对象存储拉回上传文件字节——**模板由调用方给定**，服务不解读其归属语义。
+快照格式约定（informative）：payload v2 包含 `workspace/`、`debug/` 与会话根点前缀条目；旧版根即 workspace 的平铺包继续兼容。若 workspace 内带 `uploads-meta/upload-log.json`（`{rel: sha}`），且请求提供 `blob_key_template`（如 `users/u1/blobs/{sha2}/{sha}`，占位符 `{sha}`/`{sha2}`），服务逐条从对象存储拉回上传文件字节——**模板由调用方给定**，服务不解读其归属语义。
 
 > 快照的**产生**（archive）在容器内数据面完成（agent 直连对象存储，见 `agent-contract.md` §2.7），沙箱服务只负责「按不透明 key 恢复」。对象存储经 `ObjectStore` 协议可插拔，默认 MinIO（读 `MINIO_*` env）。
 

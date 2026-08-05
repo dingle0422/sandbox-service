@@ -156,13 +156,13 @@ class DockerBackend:
         if spec.egress_allow:
             labels["sandbox-service.egress_allow"] = ",".join(spec.egress_allow)
         env = {k: v for k, v in dict(spec.env).items() if k.upper() not in _ENV_DENYLIST}
-        volumes: dict[str, dict] = {str(workspace): {"bind": "/workspace", "mode": "rw"}}
+        volumes: dict[str, dict] = {str(workspace.parent): {"bind": "/session", "mode": "rw"}}
         for host, target, mode in spec.extra_mounts:
             volumes[host] = {"bind": target, "mode": mode}
         container = self._cli().containers.create(
             image=spec.image,
             command=command,
-            working_dir="/workspace",
+            working_dir="/session/workspace",
             volumes=volumes,
             environment=env,
             labels=labels,

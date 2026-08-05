@@ -5,10 +5,13 @@ import io
 import json
 import tarfile
 
+import pytest
 
-def _tar_gz(files: dict[str, bytes]) -> bytes:
+
+def _tar_gz(files: dict[str, bytes], *, payload_v2: bool = False) -> bytes:
     buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+    headers = {"payload-version": "2"} if payload_v2 else None
+    with tarfile.open(fileobj=buf, mode="w:gz", pax_headers=headers) as tar:
         for rel, data in files.items():
             info = tarfile.TarInfo(rel)
             info.size = len(data)
@@ -159,6 +162,59 @@ def test_snapshot_restore_and_missing(client, state):
     r = client.post("/sandboxes/s1/workspace/snapshot/restore", json={"payload_key": "snap/none.tar.gz"})
     assert r.status_code == 404
     assert client.get("/sandboxes/s1/workspace/files/report.md").status_code == 200
+
+
+def test_snapshot_restore_payload_v2_keeps_session_files_outside_workspace_api(client, state):
+    session = state.settings.workspace_root / "s1"
+    (session / "debug").mkdir(parents=True)
+    (session / "debug/stale.log").write_text("stale")
+    (session / ".old").mkdir()
+    (session / ".old/stale.json").write_text("stale")
+    state.store.objects["snap/v2.tar.gz"] = _tar_gz(
+        {
+            "workspace/report.md": b"# v2",
+            "debug/run.log": b"debug",
+            ".debug/trace.json": b"trace",
+        },
+        payload_v2=True,
+    )
+
+    r = client.post("/sandboxes/s1/workspace/snapshot/restore", json={"payload_key": "snap/v2.tar.gz"})
+
+    assert r.status_code == 200
+    assert (session / "workspace/report.md").read_bytes() == b"# v2"
+    assert (session / "debug/run.log").read_bytes() == b"debug"
+    assert (session / ".debug/trace.json").read_bytes() == b"trace"
+    assert not (session / "debug/stale.log").exists()
+    assert not (session / ".old").exists()
+    names = {node["name"] for node in client.get("/sandboxes/s1/workspace/files").json()["tree"]}
+    assert "debug" not in names
+    assert ".debug" not in names
+
+
+@pytest.mark.parametrize(
+    ("name", "linkname"),
+    [("../escaped", ""), ("scratch/file", ""), ("workspace/link", "/etc/passwd")],
+)
+def test_snapshot_restore_rejects_unsafe_payload_v2_before_clearing(client, state, name, linkname):
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz", pax_headers={"payload-version": "2"}) as tar:
+        info = tarfile.TarInfo(name)
+        if linkname:
+            info.type = tarfile.SYMTYPE
+            info.linkname = linkname
+            tar.addfile(info)
+        else:
+            info.size = 1
+            tar.addfile(info, io.BytesIO(b"x"))
+    state.store.objects["snap/bad.tar.gz"] = buf.getvalue()
+    client.post("/sandboxes/s1/workspace/ensure")
+    client.put("/sandboxes/s1/workspace/files/keep.txt", json={"content": "keep"})
+
+    with pytest.raises(ValueError):
+        client.post("/sandboxes/s1/workspace/snapshot/restore", json={"payload_key": "snap/bad.tar.gz"})
+
+    assert (state.settings.workspace_root / "s1/workspace/keep.txt").read_text() == "keep"
 
 
 def test_snapshot_restore_expands_upload_blobs(client, state):

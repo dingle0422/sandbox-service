@@ -15,7 +15,8 @@ COPY echo_agent /srv/echo_agent
 
 ENV PYTHONPATH=/srv \
     AGENT_PORT=8080 \
-    WORKSPACE=/workspace
+    WORKSPACE=/session/workspace \
+    DEBUG_DIR=/session/debug
 
 EXPOSE 8080
 

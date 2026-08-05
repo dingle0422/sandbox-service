@@ -45,7 +45,7 @@
         "history": { "type": ["array", "null"], "items": { "type": "object" } },
         "model": { "type": ["string", "null"] },
         "owner_id": { "type": ["string", "null"] },
-        "workspace": { "type": "string", "default": "/workspace" },
+        "workspace": { "type": "string", "default": "/session/workspace" },
         "resume_item": {
           "type": ["object", "null"],
           "description": "非空即 resume 语义；结构见 agent-protocol.schema.json（ResumeItem）"

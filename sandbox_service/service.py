@@ -172,13 +172,20 @@ class ServiceState:
         workspace, debug = session_paths(s.workspace_root, sandbox_id)
         debug.mkdir(parents=True, exist_ok=True)
         p = int(port or s.agent_port)
+        agent_env = dict(env or {})
+        agent_env.setdefault("WORKSPACE", "/session/workspace")
+        agent_env.setdefault("DEBUG_DIR", "/session/debug")
+        if agent_env["WORKSPACE"] == "/workspace":
+            agent_env["WORKSPACE"] = "/session/workspace"
+        if agent_env["DEBUG_DIR"] == "/tmp/debug":
+            agent_env["DEBUG_DIR"] = "/session/debug"
         return ContainerSpec(
             sandbox_id=sandbox_id,
             image=image or s.agent_image,
             workspace_path=workspace,
             cpu_limit=float(cpu or s.agent_cpu),
             mem_mb=int(mem_mb or s.agent_mem_mb),
-            env=dict(env or {}),
+            env=agent_env,
             network=s.agent_network or None,
             port=p,
             command=self.default_command(p),

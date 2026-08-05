@@ -39,7 +39,7 @@ uvicorn echo_agent.app:app --port 8080     # 手动起来点一点
 你的 agent 通常只需替换三处：
 - `/agent/input` 后台 worker：把 echo 换成真正的 run（调 LLM、跑工具、发 AG-UI 事件）；
 - `/agent/materialize`：新会话按需播种、旧会话按 `payload_key` 从对象存储恢复（echo 直接 `skipped`）；
-- `/agent/archive`：把 `/workspace` 打包上传对象存储并返回 `payload_key`（echo 是 stub）。
+- `/agent/archive`：把会话根按 payload v2 格式打包上传对象存储并返回 `payload_key`（echo 是 stub）。
 
 事件结构（`RUN_STARTED`/`TEXT_MESSAGE_*`/`TOOL_CALL_*`/`RUN_FINISHED`…）见 `agent-protocol.md`；`__finalize__` 信封见 `agent-contract.md` §2.5。
 
@@ -50,11 +50,11 @@ uvicorn echo_agent.app:app --port 8080     # 手动起来点一点
 容器启动时由沙箱服务注入 env（`agent-contract.md` §4）。核心的几类：
 
 - 身份：`SESSION_ID` / `OWNER_ID` / `PROJECT_ID` / `PAYLOAD_KEY`；
-- 路径：`WORKSPACE=/workspace`、`DEBUG_DIR=/tmp/debug`；
+- 路径：`WORKSPACE=/session/workspace`、`DEBUG_DIR=/session/debug`；
 - LLM（经宿主 proxy，**永不给真实 key**）：`LLM_BASE_URL`、`LLM_API_KEY`(= `AGENT_TOKEN`)、`LLM_MODEL`/`LLM_DIALECT`/`LLM_TEMPERATURE`；
 - 对象存储（数据面直连）：`MINIO_ENDPOINT`/`MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`/`MINIO_SECURE`/`MINIO_DEFAULT_BUCKET`/`MINIO_REGION`。
 
-**文件系统契约**：`/workspace` 是唯一持久面（宿主 bind mount）；其余易失。骨架目录与归档范围见 `agent-contract.md` §5。你的 agent **不自行持久化对话历史**（宿主经 `history` 装载、`__finalize__` 回收）。
+**文件系统契约**：`/session` 是会话持久面（宿主 bind mount），业务工具仍只加载 `/session/workspace`。骨架目录与归档范围见 `agent-contract.md` §5。你的 agent **不自行持久化对话历史**（宿主经 `history` 装载、`__finalize__` 回收）。
 
 > 若你的 agent 不需要 LLM/MinIO/税务扩展（如纯工具型），忽略对应 env 即可——沙箱不强制。
 
@@ -70,7 +70,7 @@ WORKDIR /srv
 COPY your_agent/requirements.txt /tmp/req.txt
 RUN pip install --no-cache-dir -r /tmp/req.txt
 COPY your_agent /srv/your_agent
-ENV PYTHONPATH=/srv AGENT_PORT=8080 WORKSPACE=/workspace
+ENV PYTHONPATH=/srv AGENT_PORT=8080 WORKSPACE=/session/workspace DEBUG_DIR=/session/debug
 EXPOSE 8080
 CMD ["sh", "-c", "uvicorn your_agent.app:app --host 0.0.0.0 --port ${AGENT_PORT:-8080}"]
 ```

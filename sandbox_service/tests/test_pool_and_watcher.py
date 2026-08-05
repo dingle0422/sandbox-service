@@ -9,6 +9,23 @@ def _spec(state, sid):
     return state.build_spec(sid)
 
 
+def test_build_spec_sets_session_paths_and_normalizes_legacy_values(state):
+    defaults = state.build_spec("defaults")
+    legacy = state.build_spec(
+        "legacy", env={"WORKSPACE": "/workspace", "DEBUG_DIR": "/tmp/debug", "KEEP": "yes"}
+    )
+    custom = state.build_spec("custom", env={"WORKSPACE": "/data", "DEBUG_DIR": "/logs"})
+
+    assert defaults.env["WORKSPACE"] == "/session/workspace"
+    assert defaults.env["DEBUG_DIR"] == "/session/debug"
+    assert legacy.env == {
+        "WORKSPACE": "/session/workspace",
+        "DEBUG_DIR": "/session/debug",
+        "KEEP": "yes",
+    }
+    assert custom.env == {"WORKSPACE": "/data", "DEBUG_DIR": "/logs"}
+
+
 def test_ttl_marks_evict_candidate_without_stopping(state):
     state.pool._idle_ttl = 0.01
     cid, reused = state.pool.acquire("s1", _spec(state, "s1"))

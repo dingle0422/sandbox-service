@@ -14,7 +14,7 @@ import io
 import logging
 import shutil
 import tarfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 from sandbox_service.objectstore import ObjectNotFoundError, ObjectStore
@@ -80,7 +80,37 @@ def restore_snapshot(
     if not store.exists(payload_key):
         raise SnapshotMissingError(payload_key)
 
+    try:
+        data = store.get_bytes(payload_key)
+    except ObjectNotFoundError as exc:
+        raise SnapshotMissingError(payload_key) from exc
+
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+        members = tar.getmembers()
+        version = tar.pax_headers.get("payload-version")
+        if version not in {None, "2"}:
+            raise ValueError(f"unsupported payload version: {version}")
+        is_v2 = version == "2"
+        for member in members:
+            path = PurePosixPath(member.name)
+            if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk():
+                raise ValueError(f"unsafe payload member: {member.name}")
+            if (
+                is_v2
+                and path.parts
+                and path.parts[0] not in {"workspace", "debug"}
+                and not path.parts[0].startswith(".")
+            ):
+                raise ValueError(f"unexpected payload root: {member.name}")
+
     workspace = Path(workspace)
+    if is_v2 and workspace.parent.is_dir():
+        for child in workspace.parent.iterdir():
+            if child.name == "debug" or child.name.startswith("."):
+                if child.is_dir():
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    child.unlink(missing_ok=True)
     keep = frozenset(preserve or [])
     if workspace.is_dir():
         for child in workspace.iterdir():
@@ -95,13 +125,9 @@ def restore_snapshot(
                     pass
     ensure_workspace(workspace, skeleton_dirs)
 
-    try:
-        data = store.get_bytes(payload_key)
-    except ObjectNotFoundError as exc:
-        raise SnapshotMissingError(payload_key) from exc
     total = len(data)
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
-        tar.extractall(path=workspace)
+        tar.extractall(path=workspace.parent if is_v2 else workspace, filter="data")
 
     total += _expand_upload_blobs(workspace, store, blob_key_template)
     return total
