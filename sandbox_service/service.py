@@ -245,6 +245,7 @@ def build_state(
         interval_seconds=s.watch_interval_seconds,
         orphan_sweep_seconds=s.orphan_sweep_seconds,
         orphan_min_age_seconds=s.orphan_min_age_seconds,
+        evict_grace_seconds=s.evict_grace_seconds,
     )
     return ServiceState(
         settings=s,

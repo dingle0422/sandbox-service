@@ -41,6 +41,11 @@ class Settings:
     orphan_sweep_seconds: float = 60.0
     #: 孤儿最小年龄（秒）：低于此年龄的容器视为「在途创建」，巡检放行
     orphan_min_age_seconds: float = 120.0
+    #: evict_candidate 自动回收宽限期（秒）。<=0 关闭（默认，保持「服务不自行销毁」契约）。
+    #: 开启后：沙箱被标记为 evict_candidate 超过该时长仍无人认领（无流量、未 DELETE），
+    #: 由 watcher 自动 stop + 摘租约。总存活 ≈ IDLE_TTL_SECONDS + EVICT_GRACE_SECONDS。
+    #: 调用方不发 DELETE 的部署建议开启（如 3600）；调用方自行销毁的部署保持 0。
+    evict_grace_seconds: float = 0.0
 
     # 容器缺省 spec（可被 POST /sandboxes 请求体覆盖）
     agent_image: str = "tax-agent:agent-latest"
@@ -105,6 +110,7 @@ def load_settings() -> Settings:
         watch_interval_seconds=_f("WATCH_INTERVAL_SECONDS", 5.0),
         orphan_sweep_seconds=_f("ORPHAN_SWEEP_SECONDS", 60.0),
         orphan_min_age_seconds=_f("ORPHAN_MIN_AGE_SECONDS", 120.0),
+        evict_grace_seconds=_f("EVICT_GRACE_SECONDS", 0.0),
         agent_image=_s("AGENT_IMAGE") or _s("CONTAINER_IMAGE", "tax-agent:agent-latest"),
         image_pull_policy=_pull_policy(),
         agent_port=_i("AGENT_PORT", 8080),

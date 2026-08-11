@@ -40,7 +40,7 @@ Sandbox（沙箱）
  └─ session root  = 服务本地目录，bind mount 到容器 /session（工作区为 /session/workspace）
 ```
 
-- **keep-warm 池语义**：`POST /sandboxes` 对同一 `id` 幂等——已有活容器则直接复用返回；池满返回 503 `capacity_full`；空闲超 TTL 进入 `evict_candidate`（只标记，不自行销毁，由调用方决策，见 §2.6 webhook）。
+- **keep-warm 池语义**：`POST /sandboxes` 对同一 `id` 幂等——已有活容器则直接复用返回；池满返回 503 `capacity_full`；空闲超 TTL 进入 `evict_candidate`（默认只标记，不自行销毁，由调用方决策，见 §2.6 webhook；可选 `EVICT_GRACE_SECONDS>0` 开启超期自动回收）。
 
 ## 2. 端点（目标形态）
 
@@ -159,14 +159,15 @@ DELETE 的销毁结果**以容器运行时为准，不以服务内存账本为�
 
 ```jsonc
 // POST {CALLBACK_URL}
-{ "kind": "evict_candidate" | "dead" | "exited",
+{ "kind": "evict_candidate" | "evicted" | "dead" | "exited",
   "sandbox_id": "s-123",
   "container_id": "…",
-  "reason": "idle_ttl" | "health_probe_failed" | "oom" | "exit",
+  "reason": "idle_ttl" | "idle_ttl_grace_expired" | "health_probe_failed" | "oom" | "exit",
   "ts": "2026-07-24T09:00:00Z" }
 ```
 
-- `evict_candidate`：空闲超 TTL。服务**不自行销毁**；调用方收到后自行决策（如先经代理归档，再 `DELETE /sandboxes/{id}`）。
+- `evict_candidate`：空闲超 TTL。服务默认**不自行销毁**；调用方收到后自行决策（如先经代理归档，再 `DELETE /sandboxes/{id}`）。
+- `evicted`：opt-in 自动回收（`EVICT_GRACE_SECONDS>0`）--成为 `evict_candidate` 超过宽限期仍无人认领，服务自行 stop + 摘租约。此时租约已摘，通知只走部署级 `CALLBACK_URL`（取不到按沙箱 `callback_url`）。
 - `dead` / `exited`：健康探测连续失败 / 容器退出（含 OOM）。
 
 ## 3. 环境变量（服务自身配置）
@@ -185,6 +186,7 @@ DELETE 的销毁结果**以容器运行时为准，不以服务内存账本为�
 | `ORPHAN_SWEEP_SECONDS` | 孤儿容器巡检周期（缺省 60；`<=0` 关闭） |
 | `ORPHAN_MIN_AGE_SECONDS` | 巡检放行的容器年龄（缺省 120），保护在途创建 |
 | `POOL_CAPACITY` / `IDLE_TTL_SECONDS` / `REAP_INTERVAL_SECONDS` | 池治理 |
+| `EVICT_GRACE_SECONDS` | opt-in 自动回收宽限期（秒，缺省 `0` = 关闭，保持「服务不自行销毁」）。开启后：空闲超 `IDLE_TTL_SECONDS` 被标记为 `evict_candidate`，再超 `EVICT_GRACE_SECONDS` 仍无人认领则由服务自动 stop + 摘租约（发 `evicted` webhook）。总存活 ≈ `IDLE_TTL_SECONDS + EVICT_GRACE_SECONDS` |
 | `CALLBACK_URL` | §2.6 webhook 部署级默认 sink（空 = 不通知；可被按沙箱 `callback_url` 覆盖） |
 | `ENABLE_LEGACY_SHIM` | 是否挂载本仓税务兼容层（`0` = 纯通用服务，缺省 `1`） |
 | `MINIO_*` | ObjectStore 默认实现（MinIO/S3 兼容）凭据 |

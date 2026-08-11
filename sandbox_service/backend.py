@@ -216,12 +216,20 @@ class DockerBackend:
                 logger.warning("容器 %s 失败 cid=%s", op, container_id, exc_info=True)
 
         try:
-            self._cli().containers.get(container_id)
+            st = self.inspect(container_id)
         except not_found:
             return
         except Exception as exc:
             raise ContainerStopError(f"容器复查失败 cid={container_id}: {exc}") from exc
-        raise ContainerStopError(f"stop/remove 后容器仍存在 cid={container_id}")
+        if st.state == ContainerState.REMOVING:
+            # 并发删除竞态：remove 返回 409 "removal already in progress" 后容器处于
+            # removing 中间态仍可查到（单次 DELETE 内 terminate->stop_for_sandbox 两次
+            # stop 同一容器也会撞上）。Docker 会在内部完成移除，不必误报失败触发调用方重试。
+            logger.info("容器移除进行中，视为成功 cid=%s", container_id)
+            return
+        raise ContainerStopError(
+            f"stop/remove 后容器仍存在 cid={container_id} state={st.state.value}"
+        )
 
     def stop_for_sandbox(self, sandbox_id: str) -> int:
         """按 ``sandbox_id`` label 停掉该沙箱名下**全部**容器；返回处理数。

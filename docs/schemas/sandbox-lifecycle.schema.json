@@ -57,7 +57,7 @@
         },
         "callback_url": {
           "type": ["string", "null"],
-          "description": "本沙箱事件通知 sink（evict/dead/exited）；缺省回落部署级 CALLBACK_URL。服务视作不透明 URL"
+          "description": "本沙箱事件通知 sink（evict_candidate/evicted/dead/exited）；缺省回落部署级 CALLBACK_URL。服务视作不透明 URL"
         }
       },
       "additionalProperties": false
@@ -134,10 +134,10 @@
       "description": "POST {CALLBACK_URL} 通知体",
       "required": ["kind", "sandbox_id", "ts"],
       "properties": {
-        "kind": { "enum": ["evict_candidate", "dead", "exited"] },
+        "kind": { "enum": ["evict_candidate", "evicted", "dead", "exited"] },
         "sandbox_id": { "type": "string" },
         "container_id": { "type": "string" },
-        "reason": { "enum": ["idle_ttl", "health_probe_failed", "oom", "exit"] },
+        "reason": { "enum": ["idle_ttl", "idle_ttl_grace_expired", "health_probe_failed", "oom", "exit"] },
         "ts": { "type": "string", "format": "date-time" }
       },
       "additionalProperties": true

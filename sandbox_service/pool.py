@@ -53,7 +53,7 @@ class SandboxPool:
         self._capacity = max(1, int(capacity))
         self._idle_ttl = max(0.0, float(idle_ttl))
         self._leases: dict[str, Lease] = {}
-        self._evict_candidates: set[str] = set()
+        self._evict_candidates: dict[str, float] = {}
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._reaper: Optional[threading.Thread] = None
@@ -83,7 +83,7 @@ class SandboxPool:
                 lease.last_active = time.time()
                 if meta:
                     lease.meta.update(meta)
-                self._evict_candidates.discard(sandbox_id)
+                self._evict_candidates.pop(sandbox_id, None)
                 return lease.container_id, True
             if self._live_count() >= self._capacity:
                 return None
@@ -102,7 +102,7 @@ class SandboxPool:
                 last_active=time.time(),
                 meta=dict(meta or {}),
             )
-            self._evict_candidates.discard(sandbox_id)
+            self._evict_candidates.pop(sandbox_id, None)
         logger.info("容器已起 sandbox=%s cid=%s", sandbox_id, cid[:12])
         return cid, False
 
@@ -120,19 +120,19 @@ class SandboxPool:
             lease = self._leases.get(sandbox_id)
             if lease is not None:
                 lease.last_active = time.time()
-                self._evict_candidates.discard(sandbox_id)
+                self._evict_candidates.pop(sandbox_id, None)
 
     def forget(self, sandbox_id: str) -> bool:
         """丢弃僵尸租约（容器已消失）：只清账本，不 stop。返回是否确有删除。"""
         with self._lock:
-            self._evict_candidates.discard(sandbox_id)
+            self._evict_candidates.pop(sandbox_id, None)
             return self._leases.pop(sandbox_id, None) is not None
 
     def terminate(self, sandbox_id: str, *, grace_seconds: float = 5.0, delete_workspace: bool = False) -> bool:
         """停容器（幂等）。默认不删工作区（工作区归属由调用方管理）。"""
         with self._lock:
             lease = self._leases.pop(sandbox_id, None)
-            self._evict_candidates.discard(sandbox_id)
+            self._evict_candidates.pop(sandbox_id, None)
         if lease is None:
             return False
         try:
@@ -192,7 +192,7 @@ class SandboxPool:
                 if (now - lease.last_active) < self._idle_ttl:
                     continue
                 if sid not in self._evict_candidates:
-                    self._evict_candidates.add(sid)
+                    self._evict_candidates[sid] = now
                     marked.append(sid)
                     logger.info("TTL 可逐出 candidate sandbox=%s", sid)
         return marked
@@ -204,6 +204,49 @@ class SandboxPool:
         if min_age_seconds is None:
             return self._backend.reap_orphans(keep_ids=keep)
         return self._backend.reap_orphans(keep_ids=keep, min_age_seconds=min_age_seconds)
+
+    def reap_expired_candidates(self, *, grace_seconds: float) -> list[tuple[str, str]]:
+        """opt-in 自动回收：成为 evict_candidate 超过 ``grace_seconds`` 的沙箱一律销毁。
+
+        ``grace_seconds<=0`` 时不做任何事（保持「服务不自行销毁」契约，由调用方决策销毁）。
+        返回本轮销毁的 ``(sandbox_id, container_id)`` 列表。
+
+        原子性：check 年龄 + pop 租约/候选标记必须在同一把锁内完成，否则 ``touch``/``acquire``
+        可能在锁间隙把一个正要回收的活跃沙箱移出候选--而租约还在--导致误杀。``stop`` 是慢
+        Docker 调用，放到锁外执行；stop 失败则容器成孤儿，交由 ``reap_orphans`` 兜底
+        （此时已不在 keep_ids）。不删工作区（工作区归属由调用方管理，与 ``terminate`` 一致）。
+        """
+        if grace_seconds <= 0:
+            return []
+        now = time.time()
+        to_stop: list[tuple[str, Lease]] = []
+        with self._lock:
+            for sid, marked_at in list(self._evict_candidates.items()):
+                if (now - marked_at) < grace_seconds:
+                    continue
+                lease = self._leases.get(sid)
+                if lease is not None and lease.leased > 0:
+                    # 防御：候选列表里不该出现活跃租约（acquire/touch 会移出候选）。出现即
+                    # 状态不一致，移出候选放它一马，不强杀。
+                    self._evict_candidates.pop(sid, None)
+                    continue
+                self._leases.pop(sid, None)
+                self._evict_candidates.pop(sid, None)
+                if lease is not None:
+                    to_stop.append((sid, lease))
+        destroyed: list[tuple[str, str]] = []
+        for sid, lease in to_stop:
+            try:
+                self._backend.stop(lease.container_id)
+            except Exception:
+                logger.exception("evict 超期回收 stop 失败 sandbox=%s", sid)
+            destroyed.append((sid, lease.container_id))
+        if destroyed:
+            logger.info(
+                "evict_candidate 超期自动回收 grace=%ss count=%d ids=%s",
+                grace_seconds, len(destroyed), [s for s, _ in destroyed],
+            )
+        return destroyed
 
     def stats(self) -> dict:
         with self._lock:

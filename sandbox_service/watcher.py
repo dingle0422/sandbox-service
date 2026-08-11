@@ -82,6 +82,7 @@ class SandboxWatcher:
         interval_seconds: float = 5.0,
         orphan_sweep_seconds: float = 60.0,
         orphan_min_age_seconds: float = DEFAULT_ORPHAN_MIN_AGE_SECONDS,
+        evict_grace_seconds: float = 0.0,
         notify_fn: Optional[Callable[[str, str, str, str], None]] = None,
     ) -> None:
         self._pool = pool
@@ -89,6 +90,9 @@ class SandboxWatcher:
         self._interval = max(1.0, float(interval_seconds))
         self._orphan_sweep_interval = float(orphan_sweep_seconds)
         self._orphan_min_age = float(orphan_min_age_seconds)
+        #: evict_candidate 自动回收宽限期（<=0 关闭，保持「服务不自行销毁」契约）。
+        #: 开启后：被标记为 candidate 超过该时长仍无人认领的沙箱由本 watcher 自动销毁。
+        self._evict_grace = float(evict_grace_seconds)
         self._last_orphan_sweep = 0.0
         #: 测试注入点（签名 (kind, sandbox_id, container_id, reason)）；生产走 _emit → notifier
         self._notify_fn = notify_fn
@@ -148,6 +152,10 @@ class SandboxWatcher:
                 self._emit("evict_candidate", sid, lease.container_id, "idle_ttl")
         self._notified_candidates = candidates
 
+        # 2.5) opt-in 自动回收：candidate 超过宽限期仍无人认领 -> 销毁。
+        #      默认关闭（evict_grace<=0），开启后反转「服务不自行销毁」前提。
+        self._reap_expired_candidates()
+
         # 3) 清理不在池内的账本
         live = {lease.container_id for _, lease in self._pool.iter_leases()}
         for cid in list(self._was_running):
@@ -172,6 +180,23 @@ class SandboxWatcher:
             return
         if n:
             logger.warning("孤儿容器巡检回收 count=%d", n)
+
+    def _reap_expired_candidates(self) -> None:
+        """opt-in：销毁成为 evict_candidate 超过宽限期的沙箱并上报 ``evicted`` 事件。
+
+        ``evict_grace<=0`` 时关闭（保持「服务不自行销毁」契约）。通知走部署级
+        ``CALLBACK_URL``--此时租约已被 ``reap_expired_candidates`` 摘除，per-sandbox
+        ``callback_url`` 取不到（已知限制，如需保留需让回收方法回传 meta）。
+        """
+        if self._evict_grace <= 0:
+            return
+        try:
+            destroyed = self._pool.reap_expired_candidates(grace_seconds=self._evict_grace)
+        except Exception:
+            logger.exception("evict 超期回收异常")
+            return
+        for sid, cid in destroyed:
+            self._emit("evicted", sid, cid, "idle_ttl_grace_expired")
 
     def _loop(self) -> None:
         while not self._stop.wait(self._interval):
