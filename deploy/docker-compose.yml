@@ -27,6 +27,7 @@ services:
       SERVICE_TOKEN: ${SERVICE_TOKEN:?set SERVICE_TOKEN}
       SANDBOX_WORKSPACE_ROOT: ${SANDBOX_HOST_WORKSPACE_ROOT:-/var/sandbox/workspaces}
       AGENT_IMAGE: ${AGENT_IMAGE:?set AGENT_IMAGE}
+      SANDBOX_SERVICE_IMAGE: ${SANDBOX_SERVICE_IMAGE:-sandbox-service:latest}
       AGENT_COMMAND: ${AGENT_COMMAND:-}
       AGENT_PORT: ${AGENT_PORT:-8080}
       AGENT_CPU: ${AGENT_CPU:-}
@@ -40,6 +41,9 @@ services:
       # evict_candidate 自动回收宽限期（秒，<=0 关闭）：空闲超 TTL 被标记为候选，
       # 再超该时长仍无人认领则由服务自动销毁。总存活 ≈ IDLE_TTL + EVICT_GRACE。
       EVICT_GRACE_SECONDS: ${EVICT_GRACE_SECONDS:-0}
+      # 僵尸镜像 GC（本地 tag；registry 仍可再拉）
+      IMAGE_IDLE_TTL_SECONDS: ${IMAGE_IDLE_TTL_SECONDS:-604800}
+      IMAGE_GC_INTERVAL_SECONDS: ${IMAGE_GC_INTERVAL_SECONDS:-3600}
       # 工作区骨架目录：建沙箱时预建的空目录，按接入业务的约定配置（留空 = 只建 workspace 根）
       WORKSPACE_SKELETON_DIRS: ${WORKSPACE_SKELETON_DIRS:-}
       # 通用事件通知 sink（可选，部署级默认）：exit/dead/evict。调用方也可在 POST /sandboxes

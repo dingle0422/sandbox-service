@@ -47,6 +47,13 @@ class Settings:
     #: 调用方不发 DELETE 的部署建议开启（如 3600）；调用方自行销毁的部署保持 0。
     evict_grace_seconds: float = 0.0
 
+    #: 僵尸镜像 GC：超过该秒数未再用来起容器的已登记 agent 镜像本地 tag 可删（缺省 7 天）。
+    image_idle_ttl_seconds: float = 604800.0
+    #: 镜像 GC 巡检周期（秒，<=0 关闭）。
+    image_gc_interval_seconds: float = 3600.0
+    #: 本服务自身镜像 tag（GC 永不删除）。
+    sandbox_service_image: str = "sandbox-service:latest"
+
     # 容器缺省 spec（可被 POST /sandboxes 请求体覆盖）
     agent_image: str = "tax-agent:agent-latest"
     #: 起容器前的镜像拉取策略。跨机部署下镜像由 registry 分发，而 docker create **不会**
@@ -111,6 +118,9 @@ def load_settings() -> Settings:
         orphan_sweep_seconds=_f("ORPHAN_SWEEP_SECONDS", 60.0),
         orphan_min_age_seconds=_f("ORPHAN_MIN_AGE_SECONDS", 120.0),
         evict_grace_seconds=_f("EVICT_GRACE_SECONDS", 0.0),
+        image_idle_ttl_seconds=_f("IMAGE_IDLE_TTL_SECONDS", 604800.0),
+        image_gc_interval_seconds=_f("IMAGE_GC_INTERVAL_SECONDS", 3600.0),
+        sandbox_service_image=_s("SANDBOX_SERVICE_IMAGE", "sandbox-service:latest"),
         agent_image=_s("AGENT_IMAGE") or _s("CONTAINER_IMAGE", "tax-agent:agent-latest"),
         image_pull_policy=_pull_policy(),
         agent_port=_i("AGENT_PORT", 8080),

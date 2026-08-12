@@ -185,6 +185,9 @@ DELETE 的销毁结果**以容器运行时为准，不以服务内存账本为�
 | `AGENT_NETWORK` / `AGENT_EGRESS_ALLOW` | 容器网络 / 出网白名单缺省 |
 | `ORPHAN_SWEEP_SECONDS` | 孤儿容器巡检周期（缺省 60；`<=0` 关闭） |
 | `ORPHAN_MIN_AGE_SECONDS` | 巡检放行的容器年龄（缺省 120），保护在途创建 |
+| `IMAGE_IDLE_TTL_SECONDS` | 僵尸镜像：本服务登记过的 agent 镜像超过该秒数未再用来起容器则可删本地 tag（缺省 `604800` = 7 天） |
+| `IMAGE_GC_INTERVAL_SECONDS` | 镜像 GC 巡检周期（缺省 `3600`；`<=0` 关闭）。永不删除当前 `AGENT_IMAGE`、`SANDBOX_SERVICE_IMAGE`、以及仍被任意容器引用的镜像。只删本机缓存，registry 仍在；`ensure_image` / `POST /images` 可再拉（`AGENT_IMAGE_PULL_POLICY=never` 时需人工 pull 或改策略） |
+| `SANDBOX_SERVICE_IMAGE` | 本服务镜像 tag（GC 保护名单；缺省 `sandbox-service:latest`） |
 | `POOL_CAPACITY` / `IDLE_TTL_SECONDS` / `REAP_INTERVAL_SECONDS` | 池治理 |
 | `EVICT_GRACE_SECONDS` | opt-in 自动回收宽限期（秒，缺省 `0` = 关闭，保持「服务不自行销毁」）。开启后：空闲超 `IDLE_TTL_SECONDS` 被标记为 `evict_candidate`，再超 `EVICT_GRACE_SECONDS` 仍无人认领则由服务自动 stop + 摘租约（发 `evicted` webhook）。总存活 ≈ `IDLE_TTL_SECONDS + EVICT_GRACE_SECONDS` |
 | `CALLBACK_URL` | §2.6 webhook 部署级默认 sink（空 = 不通知；可被按沙箱 `callback_url` 覆盖） |

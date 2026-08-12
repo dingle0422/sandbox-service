@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # 仓库根
 
 from sandbox_service.backend import ContainerState, ContainerStatus  # noqa: E402
 from sandbox_service.config import Settings  # noqa: E402
+from sandbox_service.image_gc import ImageUsageStore  # noqa: E402
 from sandbox_service.objectstore import ObjectNotFoundError  # noqa: E402
 from sandbox_service.pool import SandboxPool  # noqa: E402
 from sandbox_service.service import ServiceState  # noqa: E402
@@ -36,6 +37,9 @@ class FakeBackend:
         self.images: set[str] = set()
         self.pulled: list[str] = []
         self.pull_fails = False
+        self.removed: list[str] = []
+        self.repo_tags: list[tuple[str, float]] = []
+        self.in_use: frozenset[str] = frozenset()
 
     def has_image(self, image: str) -> bool:
         return self.images_present or image in self.images
@@ -47,6 +51,21 @@ class FakeBackend:
             raise ImagePullError(f"pull failed image={image}")
         self.pulled.append(image)
         self.images.add(image)
+
+    def remove_image(self, image: str) -> bool:
+        self.removed.append(image)
+        self.images.discard(image)
+        return True
+
+    def list_repo_tags(self, repo: str) -> list[tuple[str, float]]:
+        prefix = f"{repo}:"
+        return [(t, c) for t, c in self.repo_tags if t == repo or t.startswith(prefix)]
+
+    def list_in_use_images(self) -> frozenset[str]:
+        return self.in_use
+
+    def image_idents(self, image: str) -> frozenset[str]:
+        return frozenset({image})
 
     def create(self, spec) -> str:
         self._n += 1
@@ -197,11 +216,19 @@ def state(tmp_path, fake_agent):
         workspace_skeleton_dirs=["inputs", "knowledge", "uploads"],
     )
     backend = FakeBackend(agent_url=fake_agent.url)
-    pool = SandboxPool(backend, capacity=settings.pool_capacity, idle_ttl=settings.idle_ttl_seconds)
+    usage = ImageUsageStore(tmp_path / ".sandbox-service" / "image_usage.json")
+    pool = SandboxPool(
+        backend,
+        capacity=settings.pool_capacity,
+        idle_ttl=settings.idle_ttl_seconds,
+        on_image_used=usage.touch,
+    )
     store = FakeStore()
     notifier = WebhookNotifier("", token="")
-    watcher = SandboxWatcher(pool, notifier, interval_seconds=999.0)
-    st = ServiceState(settings=settings, pool=pool, store=store, watcher=watcher)
+    watcher = SandboxWatcher(pool, notifier, interval_seconds=999.0, image_gc_interval_seconds=0.0)
+    st = ServiceState(
+        settings=settings, pool=pool, store=store, watcher=watcher, image_usage=usage
+    )
     yield st
     pool.shutdown()
 

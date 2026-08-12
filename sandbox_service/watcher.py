@@ -19,6 +19,7 @@ from typing import Callable, Optional
 import httpx
 
 from sandbox_service.backend import DEFAULT_ORPHAN_MIN_AGE_SECONDS
+from sandbox_service.image_gc import ImageUsageStore, sweep_idle_images
 from sandbox_service.pool import SandboxPool
 
 logger = logging.getLogger("sandbox_service.watcher")
@@ -83,6 +84,11 @@ class SandboxWatcher:
         orphan_sweep_seconds: float = 60.0,
         orphan_min_age_seconds: float = DEFAULT_ORPHAN_MIN_AGE_SECONDS,
         evict_grace_seconds: float = 0.0,
+        image_gc_interval_seconds: float = 0.0,
+        image_idle_ttl_seconds: float = 604800.0,
+        image_usage: Optional[ImageUsageStore] = None,
+        protected_images: frozenset[str] = frozenset(),
+        agent_image: str = "",
         notify_fn: Optional[Callable[[str, str, str, str], None]] = None,
     ) -> None:
         self._pool = pool
@@ -93,7 +99,13 @@ class SandboxWatcher:
         #: evict_candidate 自动回收宽限期（<=0 关闭，保持「服务不自行销毁」契约）。
         #: 开启后：被标记为 candidate 超过该时长仍无人认领的沙箱由本 watcher 自动销毁。
         self._evict_grace = float(evict_grace_seconds)
+        self._image_gc_interval = float(image_gc_interval_seconds)
+        self._image_idle_ttl = float(image_idle_ttl_seconds)
+        self._image_usage = image_usage
+        self._protected_images = frozenset(p for p in protected_images if p)
+        self._agent_image = agent_image
         self._last_orphan_sweep = 0.0
+        self._last_image_gc = 0.0
         #: 测试注入点（签名 (kind, sandbox_id, container_id, reason)）；生产走 _emit → notifier
         self._notify_fn = notify_fn
         self._was_running: dict[str, bool] = {}
@@ -166,6 +178,9 @@ class SandboxWatcher:
         #    以前只在启动时扫一次，运行期漏掉的容器要等下次重启才有人管。
         self._sweep_orphans()
 
+        # 5) 僵尸镜像 GC：超 TTL 未再起容器的已登记 agent 镜像本地 tag。
+        self._sweep_idle_images()
+
     def _sweep_orphans(self) -> None:
         if self._orphan_sweep_interval <= 0:
             return
@@ -180,6 +195,25 @@ class SandboxWatcher:
             return
         if n:
             logger.warning("孤儿容器巡检回收 count=%d", n)
+
+    def _sweep_idle_images(self) -> None:
+        if self._image_gc_interval <= 0 or self._image_usage is None:
+            return
+        now = time.time()
+        if (now - self._last_image_gc) < self._image_gc_interval:
+            return
+        self._last_image_gc = now
+        try:
+            sweep_idle_images(
+                self._pool.backend,  # type: ignore[arg-type]
+                self._image_usage,
+                protected=self._protected_images,
+                ttl=self._image_idle_ttl,
+                agent_image=self._agent_image,
+                now=now,
+            )
+        except Exception:
+            logger.exception("僵尸镜像巡检失败")
 
     def _reap_expired_candidates(self) -> None:
         """opt-in：销毁成为 evict_candidate 超过宽限期的沙箱并上报 ``evicted`` 事件。

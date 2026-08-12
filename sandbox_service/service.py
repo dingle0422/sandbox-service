@@ -13,6 +13,7 @@ import httpx
 
 from sandbox_service.backend import ContainerBackend, ContainerSpec, DockerBackend
 from sandbox_service.config import Settings, load_settings, session_paths
+from sandbox_service.image_gc import ImageUsageStore, default_usage_path
 from sandbox_service.objectstore import ObjectStore, load_object_store
 from sandbox_service.pool import SandboxPool
 from sandbox_service.watcher import SandboxWatcher, WebhookNotifier
@@ -53,6 +54,7 @@ class ServiceState:
     pool: SandboxPool
     store: ObjectStore
     watcher: SandboxWatcher
+    image_usage: ImageUsageStore
 
     #: 镜像就位状态（image → ImagePull），仅供观测
     _pulls: dict[str, ImagePull] = field(default_factory=dict)
@@ -80,6 +82,7 @@ class ServiceState:
         with self._lock_for(image):  # 与并发的预热/建沙箱串行
             if pol == "missing" and self.pool.backend.has_image(image):
                 self._record(image, "present")
+                self.image_usage.register(image)
                 return "present"
             self._record(image, "pulling")
             try:
@@ -88,6 +91,7 @@ class ServiceState:
                 self._record(image, "failed", error=str(exc))
                 raise
             self._record(image, "present")
+            self.image_usage.register(image)
             return "pulled"
 
     def start_image_pull(self, image: str) -> ImagePull:
@@ -96,6 +100,7 @@ class ServiceState:
         必须异步：拉 500MB 要数分钟，调用方（vm1 启动钩子）不能被卡住。
         """
         if self.pool.backend.has_image(image):
+            self.image_usage.register(image)
             return self._record(image, "present")
         with self._table_lock:
             cur = self._pulls.get(image)
@@ -230,15 +235,21 @@ def build_state(
     *,
     backend: Optional[ContainerBackend] = None,
     store: Optional[ObjectStore] = None,
+    image_usage: Optional[ImageUsageStore] = None,
 ) -> ServiceState:
     s = settings or load_settings()
+    usage = image_usage or ImageUsageStore(default_usage_path(s.workspace_root))
     pool = SandboxPool(
         backend or DockerBackend(),
         capacity=s.pool_capacity,
         idle_ttl=s.idle_ttl_seconds,
         reap_interval=s.reap_interval_seconds,
+        on_image_used=usage.touch,
     )
     notifier = WebhookNotifier(s.callback_url, token=s.service_token)
+    protected = frozenset(
+        x for x in (s.agent_image, s.sandbox_service_image) if x
+    )
     watcher = SandboxWatcher(
         pool,
         notifier,
@@ -246,12 +257,18 @@ def build_state(
         orphan_sweep_seconds=s.orphan_sweep_seconds,
         orphan_min_age_seconds=s.orphan_min_age_seconds,
         evict_grace_seconds=s.evict_grace_seconds,
+        image_gc_interval_seconds=s.image_gc_interval_seconds,
+        image_idle_ttl_seconds=s.image_idle_ttl_seconds,
+        image_usage=usage,
+        protected_images=protected,
+        agent_image=s.agent_image,
     )
     return ServiceState(
         settings=s,
         pool=pool,
         store=store if store is not None else load_object_store(),
         watcher=watcher,
+        image_usage=usage,
     )
 
 

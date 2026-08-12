@@ -37,6 +37,18 @@ class _FakeBackend:
     def pull_image(self, image: str) -> None:
         return None
 
+    def remove_image(self, image: str) -> bool:
+        return True
+
+    def list_repo_tags(self, repo: str) -> list[tuple[str, float]]:
+        return []
+
+    def list_in_use_images(self) -> frozenset[str]:
+        return frozenset()
+
+    def image_idents(self, image: str) -> frozenset[str]:
+        return frozenset({image})
+
     def create(self, spec) -> str:
         self._n += 1
         cid = f"c{self._n:04d}"
@@ -125,6 +137,7 @@ def lc(echo_base_url: str, tmp_path):
     from fastapi.testclient import TestClient
 
     from sandbox_service.config import Settings
+    from sandbox_service.image_gc import ImageUsageStore
     from sandbox_service.main import create_app
     from sandbox_service.pool import SandboxPool
     from sandbox_service.service import ServiceState
@@ -139,11 +152,25 @@ def lc(echo_base_url: str, tmp_path):
         watch_interval_seconds=999.0,
         agent_image="echo-agent:latest",
         enable_legacy_shim=False,
+        image_gc_interval_seconds=0.0,
     )
     backend = _FakeBackend(echo_base_url)
-    pool = SandboxPool(backend, capacity=settings.pool_capacity, idle_ttl=settings.idle_ttl_seconds)
-    watcher = SandboxWatcher(pool, WebhookNotifier("", token=""), interval_seconds=999.0)
-    state = ServiceState(settings=settings, pool=pool, store=_FakeStore(), watcher=watcher)
+    usage = ImageUsageStore(tmp_path / ".sandbox-service" / "image_usage.json")
+    pool = SandboxPool(
+        backend,
+        capacity=settings.pool_capacity,
+        idle_ttl=settings.idle_ttl_seconds,
+        on_image_used=usage.touch,
+    )
+    watcher = SandboxWatcher(
+        pool,
+        WebhookNotifier("", token=""),
+        interval_seconds=999.0,
+        image_gc_interval_seconds=0.0,
+    )
+    state = ServiceState(
+        settings=settings, pool=pool, store=_FakeStore(), watcher=watcher, image_usage=usage
+    )
     with TestClient(create_app(state)) as client:
         yield client
     pool.shutdown()

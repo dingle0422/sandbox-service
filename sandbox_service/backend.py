@@ -92,6 +92,10 @@ class ContainerBackend(Protocol):
     def start(self, container_id: str) -> None: ...
     def has_image(self, image: str) -> bool: ...
     def pull_image(self, image: str) -> None: ...
+    def remove_image(self, image: str) -> bool: ...
+    def list_repo_tags(self, repo: str) -> list[tuple[str, float]]: ...
+    def list_in_use_images(self) -> frozenset[str]: ...
+    def image_idents(self, image: str) -> frozenset[str]: ...
     def stop(self, container_id: str, timeout: float = 5.0) -> None: ...
     def stop_for_sandbox(self, sandbox_id: str) -> int: ...
     def inspect(self, container_id: str) -> ContainerStatus: ...
@@ -144,6 +148,97 @@ class DockerBackend:
         except Exception as exc:  # noqa: BLE001
             raise ImagePullError(f"拉取 {image} 失败：{exc}") from exc
         logger.info("镜像已拉取 image=%s", image)
+
+    def remove_image(self, image: str) -> bool:
+        """删除本地镜像 tag（``force=False``）。返回是否确实执行了删除。
+
+        ``ImageNotFound`` 视为已净（返回 False）；镜像仍被容器引用时抛错给调用方。
+        """
+        from docker.errors import ImageNotFound
+
+        try:
+            self._cli().images.remove(image, force=False)
+        except ImageNotFound:
+            return False
+        logger.info("镜像已删除 image=%s", image)
+        return True
+
+    def list_repo_tags(self, repo: str) -> list[tuple[str, float]]:
+        """列出本机 ``repo`` 下全部 ``repo:tag`` 及其 Created unix 时间。"""
+        prefix = f"{repo}:"
+        out: list[tuple[str, float]] = []
+        for img in self._cli().images.list():
+            created = self._image_created_unix(img)
+            for tag in img.tags or []:
+                if tag == repo or tag.startswith(prefix):
+                    out.append((tag, created))
+        return out
+
+    def list_in_use_images(self) -> frozenset[str]:
+        """所有容器（含 stopped）引用的镜像 tag / id 集合。"""
+        used: set[str] = set()
+        for c in self._cli().containers.list(all=True):
+            attrs = getattr(c, "attrs", None) or {}
+            config_image = (attrs.get("Config") or {}).get("Image") or ""
+            if config_image:
+                used.add(config_image)
+            image_id = attrs.get("Image") or ""
+            if image_id:
+                used.add(image_id)
+            try:
+                img = c.image
+            except Exception:
+                continue
+            for t in getattr(img, "tags", None) or []:
+                if t:
+                    used.add(t)
+            iid = getattr(img, "id", None) or ""
+            if iid:
+                used.add(iid)
+            short = getattr(img, "short_id", None) or ""
+            if short:
+                used.add(short)
+        return frozenset(used)
+
+    def image_idents(self, image: str) -> frozenset[str]:
+        """镜像的可比对标识（ref + id / short_id），用于与在用集合求交。"""
+        from docker.errors import ImageNotFound
+
+        idents: set[str] = {image}
+        try:
+            img = self._cli().images.get(image)
+        except ImageNotFound:
+            return frozenset(idents)
+        except Exception:
+            logger.exception("读取镜像标识失败 image=%s", image)
+            return frozenset(idents)
+        for t in getattr(img, "tags", None) or []:
+            if t:
+                idents.add(t)
+        iid = getattr(img, "id", None) or ""
+        if iid:
+            idents.add(iid)
+        short = getattr(img, "short_id", None) or ""
+        if short:
+            idents.add(short)
+        return frozenset(idents)
+
+    @staticmethod
+    def _image_created_unix(image: Any) -> float:
+        """Docker image Created → unix 秒；解析失败回落 0（偏保守：更早成为 GC 候选）。"""
+        created = (getattr(image, "attrs", None) or {}).get("Created")
+        if isinstance(created, (int, float)) and not isinstance(created, bool):
+            return float(created)
+        if not isinstance(created, str) or not created:
+            return 0.0
+        ts = _TS_FRACTION.sub(lambda m: "." + m.group(1)[:6], created.replace("Z", "+00:00"))
+        try:
+            dt = datetime.fromisoformat(ts)
+        except ValueError:
+            return 0.0
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
 
     # ── 生命周期 ─────────────────────────────────────────────────────────────
     def create(self, spec: ContainerSpec) -> str:

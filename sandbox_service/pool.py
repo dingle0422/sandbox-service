@@ -14,7 +14,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from sandbox_service.backend import ContainerBackend, ContainerSpec, DockerBackend
 
@@ -48,10 +48,12 @@ class SandboxPool:
         capacity: int = 8,
         idle_ttl: float = 600.0,
         reap_interval: float = 0.0,
+        on_image_used: Optional[Callable[[str], None]] = None,
     ) -> None:
         self._backend: ContainerBackend = backend or DockerBackend()
         self._capacity = max(1, int(capacity))
         self._idle_ttl = max(0.0, float(idle_ttl))
+        self._on_image_used = on_image_used
         self._leases: dict[str, Lease] = {}
         self._evict_candidates: dict[str, float] = {}
         self._lock = threading.RLock()
@@ -93,6 +95,11 @@ class SandboxPool:
         except Exception as exc:
             logger.exception("容器起失败 sandbox=%s", sandbox_id)
             raise SandboxCreateError(str(exc)) from exc
+        if self._on_image_used is not None:
+            try:
+                self._on_image_used(spec.image)
+            except Exception:
+                logger.exception("镜像用量 touch 失败 image=%s", spec.image)
         with self._lock:
             self._leases[sandbox_id] = Lease(
                 container_id=cid,
