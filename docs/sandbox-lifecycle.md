@@ -84,7 +84,7 @@ Sandbox（沙箱）
   "image": "tax-agent:agent-latest",// 可选：缺省用服务配置的 AGENT_IMAGE
   "env": { "SESSION_ID": "s-123", "AGENT_TOKEN": "…" },  // 不透明透传，服务不解析
   "port": 8080,                     // 容器内服务端口（健康检查/代理目标），缺省 8080
-  "resource_limits": { "cpu": 2.0, "mem_mb": 2048 },      // 可选，缺省服务配置
+  "resource_limits": { "cpu": 2.0, "mem_mb": 2048 },      // 可选，覆盖资源硬顶；缺省弹性 0.25~2C / 256m~2G（见下方说明）
   "egress_allow": ["10.0.0.2"],     // 可选出网白名单
   "wait_ready": { "path": "/agent/health", "timeout_s": 90 },  // 可选就绪探测（HTTP 200 即绪）
   "callback_url": "https://app/hooks/sandbox"  // 可选：本沙箱事件 sink（见 §2.6），服务视作不透明
@@ -93,6 +93,12 @@ Sandbox（沙箱）
 
 响应 200：`{"id": "s-123", "container_id": "…", "status": "ready", "workspace": "/var/sandbox/workspaces/s-123"}`
 错误：503 `capacity_full`、502 `image_pull_failed` / `container_create_failed` / `not_ready`。
+
+> **弹性资源语义**：缺省每沙箱 CPU 0.25~2 核、内存 256m~2G。下限是软底（CPU 为 `cpu_shares`
+> 调度权重，争抢时按比例分；内存为 `mem_reservation` 软预留），上限是硬顶（CFS quota /
+> `mem_limit`，禁 swap，超限 OOM 即 kill），随部署变量 `AGENT_CPU_MIN` / `AGENT_CPU` /
+> `AGENT_MEM_MIN_MB` / `AGENT_MEM_MB` 配置。请求级 `resource_limits` 只覆盖硬顶。
+> 限额不预占资源：日常占用取决于实际用量，硬顶合计超过宿主机容量时存在宿主 OOM 尾部风险。
 
 > 对比现状 `/containers/start`：`enterprise_id`/`period`/`template`/`payload_key`/`token`/`owner_id` 等业务字段全部取消——应用层把它们编进 `env` map（`ENTERPRISE_ID=…` 等），服务不再感知。
 
@@ -180,7 +186,8 @@ DELETE 的销毁结果**以容器运行时为准，不以服务内存账本为�
 | `AGENT_IMAGE` | 缺省镜像 |
 | `AGENT_IMAGE_PULL_POLICY` | 起容器前拉取策略：`missing`（缺省，本地没有才拉）｜`always`（每次查 registry，配滚动 tag 用）｜`never`（完全不拉）。非法值回落 `missing` |
 | `AGENT_COMMAND` | 缺省空 = 用镜像 CMD；`legacy` = 注入 uvicorn 命令（过渡一个版本） |
-| `AGENT_PORT` / `AGENT_CPU` / `AGENT_MEM_MB` | 缺省端口/资源 |
+| `AGENT_PORT` / `AGENT_CPU` / `AGENT_MEM_MB` | 缺省端口 / 资源硬顶（CPU 缺省 2 核、内存缺省 2048m，禁 swap） |
+| `AGENT_CPU_MIN` / `AGENT_MEM_MIN_MB` | 弹性资源软底（缺省 0.25 核权重 / 256m 软预留；clamp 到硬顶之下） |
 | `AGENT_CODE_MOUNTS` | 热挂载列表 `host:container:ro[,…]`（泛化 `AGENT_CODE_DIR`） |
 | `AGENT_NETWORK` / `AGENT_EGRESS_ALLOW` | 容器网络 / 出网白名单缺省 |
 | `ORPHAN_SWEEP_SECONDS` | 孤儿容器巡检周期（缺省 60；`<=0` 关闭） |
@@ -188,7 +195,7 @@ DELETE 的销毁结果**以容器运行时为准，不以服务内存账本为�
 | `IMAGE_IDLE_TTL_SECONDS` | 僵尸镜像：本服务登记过的 agent 镜像超过该秒数未再用来起容器则可删本地 tag（缺省 `604800` = 7 天） |
 | `IMAGE_GC_INTERVAL_SECONDS` | 镜像 GC 巡检周期（缺省 `3600`；`<=0` 关闭）。永不删除当前 `AGENT_IMAGE`、`SANDBOX_SERVICE_IMAGE`、以及仍被任意容器引用的镜像。只删本机缓存，registry 仍在；`ensure_image` / `POST /images` 可再拉（`AGENT_IMAGE_PULL_POLICY=never` 时需人工 pull 或改策略） |
 | `SANDBOX_SERVICE_IMAGE` | 本服务镜像 tag（GC 保护名单；缺省 `sandbox-service:latest`） |
-| `POOL_CAPACITY` / `IDLE_TTL_SECONDS` / `REAP_INTERVAL_SECONDS` | 池治理 |
+| `POOL_CAPACITY` / `IDLE_TTL_SECONDS` / `REAP_INTERVAL_SECONDS` | 池治理（`POOL_CAPACITY` 缺省 20，满返回 503 `capacity_full`） |
 | `EVICT_GRACE_SECONDS` | opt-in 自动回收宽限期（秒，缺省 `0` = 关闭，保持「服务不自行销毁」）。开启后：空闲超 `IDLE_TTL_SECONDS` 被标记为 `evict_candidate`，再超 `EVICT_GRACE_SECONDS` 仍无人认领则由服务自动 stop + 摘租约（发 `evicted` webhook）。总存活 ≈ `IDLE_TTL_SECONDS + EVICT_GRACE_SECONDS` |
 | `CALLBACK_URL` | §2.6 webhook 部署级默认 sink（空 = 不通知；可被按沙箱 `callback_url` 覆盖） |
 | `ENABLE_LEGACY_SHIM` | 是否挂载本仓税务兼容层（`0` = 纯通用服务，缺省 `1`） |

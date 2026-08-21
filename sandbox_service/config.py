@@ -33,7 +33,7 @@ class Settings:
     workspace_root: Path = Path("/var/sandbox/workspaces")
 
     # 池治理
-    pool_capacity: int = 8
+    pool_capacity: int = 20
     idle_ttl_seconds: float = 600.0
     reap_interval_seconds: float = 30.0
     watch_interval_seconds: float = 5.0
@@ -61,8 +61,12 @@ class Settings:
     #: ``always``＝每次都查 registry 摘要（配滚动 tag 如 :latest 用）；``never``＝完全不拉。
     image_pull_policy: str = "missing"
     agent_port: int = 8080
+    #: 弹性资源：min 是软底（CPU -> cpu_shares 调度权重 / 内存 -> mem_reservation 软预留），
+    #: max 是硬顶（CFS quota / mem_limit，禁 swap）。min <= max 由 build_spec clamp 兜底。
     agent_cpu: float = 2.0
+    agent_cpu_min: float = 0.25
     agent_mem_mb: int = 2048
+    agent_mem_min_mb: int = 256
     agent_network: str = ""
     agent_egress_allow: list[str] = field(default_factory=list)
     #: "" = 用镜像 CMD；"legacy" = 注入旧 uvicorn 入口；其余 = 自定义命令行
@@ -111,7 +115,7 @@ def load_settings() -> Settings:
         # 兼容旧变量名 VM2_SERVICE_TOKEN，便于存量部署零改切换
         service_token=_s("SERVICE_TOKEN") or _s("VM2_SERVICE_TOKEN"),
         workspace_root=Path(_s("SANDBOX_WORKSPACE_ROOT", "/var/sandbox/workspaces")).resolve(),
-        pool_capacity=_i("POOL_CAPACITY", 8),
+        pool_capacity=_i("POOL_CAPACITY", 20),
         idle_ttl_seconds=_f("IDLE_TTL_SECONDS", 600.0),
         reap_interval_seconds=_f("REAP_INTERVAL_SECONDS", 30.0),
         watch_interval_seconds=_f("WATCH_INTERVAL_SECONDS", 5.0),
@@ -125,7 +129,9 @@ def load_settings() -> Settings:
         image_pull_policy=_pull_policy(),
         agent_port=_i("AGENT_PORT", 8080),
         agent_cpu=_f("AGENT_CPU", 2.0),
+        agent_cpu_min=_f("AGENT_CPU_MIN", 0.25),
         agent_mem_mb=_i("AGENT_MEM_MB", 2048),
+        agent_mem_min_mb=_i("AGENT_MEM_MIN_MB", 256),
         agent_network=_s("AGENT_NETWORK"),
         agent_egress_allow=_csv("AGENT_EGRESS_ALLOW"),
         agent_command=_s("AGENT_COMMAND"),

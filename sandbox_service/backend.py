@@ -75,8 +75,12 @@ class ContainerSpec:
     sandbox_id: str
     image: str
     workspace_path: Path
-    cpu_limit: float = 2.0
-    mem_mb: int = 2048
+    #: 弹性资源：max 为硬顶（CFS quota / mem_limit），min 为软底（cpu_shares 权重 /
+    #: mem_reservation 软预留）。min <= max 由 build_spec clamp 保证。
+    cpu_max: float = 2.0
+    cpu_min: float = 0.25
+    mem_max_mb: int = 2048
+    mem_min_mb: int = 256
     env: dict[str, str] = field(default_factory=dict)
     network: Optional[str] = None
     port: int = 8080
@@ -244,7 +248,11 @@ class DockerBackend:
     def create(self, spec: ContainerSpec) -> str:
         workspace = Path(spec.workspace_path).resolve()
         workspace.mkdir(parents=True, exist_ok=True)
-        mem = f"{int(spec.mem_mb)}m"
+        mem = f"{int(spec.mem_max_mb)}m"
+        mem_reservation = f"{int(min(spec.mem_min_mb, spec.mem_max_mb))}m"
+        # cpu_shares：争抢时的调度权重（cgroup v2 上 docker 自动转 weight），非硬保证；
+        # 最小合法值 2。quota（nano_cpus）才是硬顶。
+        cpu_shares = max(int(min(spec.cpu_min, spec.cpu_max) * 1024), 2)
         port = int(spec.port or 8080)
         command = list(spec.command) if spec.command else None  # None → 镜像 CMD
         labels = {LABEL_SANDBOX_ID: spec.sandbox_id, LABEL_ROLE: ROLE_VALUE}
@@ -261,9 +269,11 @@ class DockerBackend:
             volumes=volumes,
             environment=env,
             labels=labels,
-            nano_cpus=int(spec.cpu_limit * 1e9),
+            nano_cpus=int(spec.cpu_max * 1e9),
+            cpu_shares=cpu_shares,
             mem_limit=mem,
             memswap_limit=mem,  # 禁 swap，OOM 即 kill
+            mem_reservation=mem_reservation,
             ports={f"{port}/tcp": None},
             detach=True,
             stdin_open=False,
@@ -276,9 +286,10 @@ class DockerBackend:
                 logger.warning("容器加入网络失败 cid=%s network=%s", container.short_id, spec.network)
         cid = container.short_id
         logger.info(
-            "容器已创建 sandbox=%s cid=%s image=%s cmd=%s cpu=%s mem=%s",
+            "容器已创建 sandbox=%s cid=%s image=%s cmd=%s cpu=%s~%s mem=%s~%s",
             spec.sandbox_id, cid, spec.image,
-            command if command is not None else "<image CMD>", spec.cpu_limit, mem,
+            command if command is not None else "<image CMD>",
+            min(spec.cpu_min, spec.cpu_max), spec.cpu_max, mem_reservation, mem,
         )
         return cid
 

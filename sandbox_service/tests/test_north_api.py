@@ -96,6 +96,24 @@ def test_env_is_opaque_passthrough(client, state):
     assert spec.env["WHATEVER_BUSINESS_KEY"] == "42"
 
 
+def test_resource_limits_defaults_elastic_and_override_clamps(client, state):
+    """缺省弹性 0.25~2C / 256m~2G；请求级 resource_limits 只覆盖硬顶，软底 clamp 到硬顶之下。"""
+    client.post("/sandboxes", json={"id": "s-default"})
+    spec = state.pool.backend.containers[
+        state.pool.get_lease("s-default").container_id]["spec"]
+    assert spec.cpu_max == 2.0 and spec.cpu_min == 0.25
+    assert spec.mem_max_mb == 2048 and spec.mem_min_mb == 256
+
+    client.post("/sandboxes", json={
+        "id": "s-override",
+        "resource_limits": {"cpu": 4.0, "mem_mb": 128},
+    })
+    spec2 = state.pool.backend.containers[
+        state.pool.get_lease("s-override").container_id]["spec"]
+    assert spec2.cpu_max == 4.0 and spec2.cpu_min == 0.25
+    assert spec2.mem_max_mb == 128 and spec2.mem_min_mb == 128  # 256 clamp 到 128
+
+
 # ── 通用代理 ─────────────────────────────────────────────────────────────────
 
 

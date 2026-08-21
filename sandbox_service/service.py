@@ -173,6 +173,10 @@ class ServiceState:
         mem_mb: Optional[int] = None,
         egress_allow: Optional[list[str]] = None,
     ) -> ContainerSpec:
+        """组装容器规格。``cpu`` / ``mem_mb`` 是请求级**硬顶**覆盖（缺省回落部署配置）；
+        软底（cpu_shares / mem_reservation）始终取部署配置，并 clamp 到硬顶之下，
+        防 mem_reservation > mem_limit 被 daemon 拒。
+        """
         s = self.settings
         workspace, debug = session_paths(s.workspace_root, sandbox_id)
         debug.mkdir(parents=True, exist_ok=True)
@@ -184,12 +188,16 @@ class ServiceState:
             agent_env["WORKSPACE"] = "/session/workspace"
         if agent_env["DEBUG_DIR"] == "/tmp/debug":
             agent_env["DEBUG_DIR"] = "/session/debug"
+        cpu_max = float(cpu or s.agent_cpu)
+        mem_max_mb = int(mem_mb or s.agent_mem_mb)
         return ContainerSpec(
             sandbox_id=sandbox_id,
             image=image or s.agent_image,
             workspace_path=workspace,
-            cpu_limit=float(cpu or s.agent_cpu),
-            mem_mb=int(mem_mb or s.agent_mem_mb),
+            cpu_max=cpu_max,
+            cpu_min=min(s.agent_cpu_min, cpu_max),
+            mem_max_mb=mem_max_mb,
+            mem_min_mb=min(s.agent_mem_min_mb, mem_max_mb),
             env=agent_env,
             network=s.agent_network or None,
             port=p,

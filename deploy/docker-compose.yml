@@ -30,13 +30,17 @@ services:
       SANDBOX_SERVICE_IMAGE: ${SANDBOX_SERVICE_IMAGE:-sandbox-service:latest}
       AGENT_COMMAND: ${AGENT_COMMAND:-}
       AGENT_PORT: ${AGENT_PORT:-8080}
+      # 弹性资源：*_MIN 为软底（cpu_shares 权重 / mem_reservation 软预留），
+      # AGENT_CPU / AGENT_MEM_MB 为硬顶（CFS quota / mem_limit，禁 swap）。缺省 0.25~2C / 256m~2G
       AGENT_CPU: ${AGENT_CPU:-}
+      AGENT_CPU_MIN: ${AGENT_CPU_MIN:-0.25}
       AGENT_MEM_MB: ${AGENT_MEM_MB:-}
+      AGENT_MEM_MIN_MB: ${AGENT_MEM_MIN_MB:-256}
       AGENT_NETWORK: ${AGENT_NETWORK:-}
       AGENT_EGRESS_ALLOW: ${AGENT_EGRESS_ALLOW:-}
       AGENT_CODE_MOUNTS: ${AGENT_CODE_MOUNTS:-}
       AGENT_CODE_DIR: ${AGENT_CODE_DIR:-}
-      POOL_CAPACITY: ${POOL_CAPACITY:-8}
+      POOL_CAPACITY: ${POOL_CAPACITY:-20}
       IDLE_TTL_SECONDS: ${IDLE_TTL_SECONDS:-600}
       # evict_candidate 自动回收宽限期（秒，<=0 关闭）：空闲超 TTL 被标记为候选，
       # 再超该时长仍无人认领则由服务自动销毁。总存活 ≈ IDLE_TTL + EVICT_GRACE。
